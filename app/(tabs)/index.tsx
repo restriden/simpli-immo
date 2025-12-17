@@ -15,6 +15,7 @@ import { useAuth } from '../../lib/auth';
 const mockTodos = [
   {
     id: '1',
+    leadId: '1',
     type: 'nachricht',
     priority: 'dringend',
     title: 'Neue Nachricht beantworten',
@@ -26,6 +27,7 @@ const mockTodos = [
   },
   {
     id: '2',
+    leadId: '2',
     type: 'finanzierung',
     priority: 'dringend',
     title: 'Finanzierungsanfrage prüfen',
@@ -37,6 +39,7 @@ const mockTodos = [
   },
   {
     id: '3',
+    leadId: '3',
     type: 'besichtigung',
     priority: 'normal',
     title: 'Besichtigung bestätigen',
@@ -48,6 +51,7 @@ const mockTodos = [
   },
   {
     id: '4',
+    leadId: '4',
     type: 'anruf',
     priority: 'normal',
     title: 'Rückruf vereinbaren',
@@ -98,7 +102,10 @@ export default function HomeScreen() {
             <Text style={styles.greeting}>Willkommen zurück,</Text>
             <Text style={styles.userName}>{firstName}</Text>
           </View>
-          <TouchableOpacity style={styles.provisionButton}>
+          <TouchableOpacity 
+            style={styles.provisionButton}
+            onPress={() => router.push('/provision')}
+          >
             <Feather name="dollar-sign" size={20} color="#F97316" />
           </TouchableOpacity>
         </View>
@@ -129,13 +136,16 @@ export default function HomeScreen() {
             <Text style={styles.statLabel}>Aktive Objekte</Text>
           </View>
           
-          <View style={styles.statCard}>
+          <TouchableOpacity 
+            style={styles.statCard}
+            onPress={() => router.push('/provision')}
+          >
             <View style={[styles.statIcon, { backgroundColor: '#D1FAE5' }]}>
               <Feather name="trending-up" size={20} color="#22C55E" />
             </View>
             <Text style={styles.statValue}>€{mockStats.monthlyProvision.toLocaleString()}</Text>
             <Text style={styles.statLabel}>Provision MTD</Text>
-          </View>
+          </TouchableOpacity>
         </View>
 
         {dringendeTodos.length > 0 && (
@@ -154,7 +164,7 @@ export default function HomeScreen() {
                 todo={todo}
                 completed={completedTodos.includes(todo.id)}
                 onToggle={() => toggleTodo(todo.id)}
-                onPress={() => {}}
+                onPress={() => router.push(`/chat/${todo.leadId}`)}
               />
             ))}
           </View>
@@ -173,7 +183,7 @@ export default function HomeScreen() {
                 todo={todo}
                 completed={completedTodos.includes(todo.id)}
                 onToggle={() => toggleTodo(todo.id)}
-                onPress={() => {}}
+                onPress={() => router.push(`/chat/${todo.leadId}`)}
               />
             ))}
           </View>

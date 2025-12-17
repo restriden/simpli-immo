@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { View, Text, ScrollView, TouchableOpacity, StyleSheet } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { useRouter } from 'expo-router';
 import { Feather } from '@expo/vector-icons';
 
 const mockLeads = [
@@ -19,6 +20,7 @@ const statusLabels: Record<string, { label: string; color: string; bg: string }>
 };
 
 export default function LeadsScreen() {
+  const router = useRouter();
   const [filter, setFilter] = useState<'alle' | 'simpli' | 'extern'>('alle');
 
   const filteredLeads = mockLeads.filter(lead => {
@@ -64,7 +66,11 @@ export default function LeadsScreen() {
         {filteredLeads.map(lead => {
           const status = statusLabels[lead.status] || statusLabels.neu;
           return (
-            <TouchableOpacity key={lead.id} style={styles.leadCard}>
+            <TouchableOpacity 
+              key={lead.id} 
+              style={styles.leadCard}
+              onPress={() => router.push(`/chat/${lead.id}`)}
+            >
               <View style={styles.leadAvatar}>
                 <Text style={styles.leadAvatarText}>{lead.name.split(' ').map(n => n[0]).join('')}</Text>
               </View>

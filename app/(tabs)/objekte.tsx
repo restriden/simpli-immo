@@ -59,7 +59,10 @@ export default function ObjekteScreen() {
     <SafeAreaView style={styles.container} edges={['top']}>
       <View style={styles.header}>
         <Text style={styles.title}>Objekte</Text>
-        <TouchableOpacity style={styles.addButton}>
+        <TouchableOpacity 
+          style={styles.addButton}
+          onPress={() => router.push('/magic-upload')}
+        >
           <Feather name="plus" size={24} color="#F97316" />
         </TouchableOpacity>
       </View>
@@ -69,7 +72,10 @@ export default function ObjekteScreen() {
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
       >
-        <TouchableOpacity style={styles.magicCard}>
+        <TouchableOpacity 
+          style={styles.magicCard}
+          onPress={() => router.push('/magic-upload')}
+        >
           <View style={styles.magicIconContainer}>
             <Feather name="upload" size={24} color="#FFFFFF" />
           </View>
@@ -99,22 +105,32 @@ export default function ObjekteScreen() {
         </View>
 
         {filteredObjekte.map(objekt => (
-          <TouchableOpacity key={objekt.id} style={styles.objektCard}>
+          <TouchableOpacity 
+            key={objekt.id} 
+            style={styles.objektCard}
+            onPress={() => router.push(`/objekt/${objekt.id}`)}
+          >
             <View style={styles.objektImage}>
               <Feather name="home" size={32} color="#D1D5DB" />
+              {objekt.status === 'verkauft' && (
+                <View style={styles.soldOverlay}>
+                  <Text style={styles.soldOverlayText}>VERKAUFT</Text>
+                </View>
+              )}
             </View>
             
             <View style={styles.objektContent}>
               <View style={styles.objektHeader}>
                 <Text style={styles.objektName}>{objekt.name}</Text>
-                {objekt.status === 'verkauft' && (
-                  <View style={styles.soldBadge}>
-                    <Text style={styles.soldBadgeText}>Verkauft</Text>
+                {objekt.status === 'verkauft' && objekt.verkauftMitSimpli && (
+                  <View style={styles.simpliBadge}>
+                    <Feather name="zap" size={10} color="#F97316" />
+                    <Text style={styles.simpliBadgeText}>Simpli</Text>
                   </View>
                 )}
                 {objekt.aiReady && objekt.status !== 'verkauft' && (
                   <View style={styles.aiBadge}>
-                    <Feather name="zap" size={12} color="#F97316" />
+                    <Feather name="cpu" size={12} color="#F97316" />
                   </View>
                 )}
               </View>
@@ -176,12 +192,14 @@ const styles = StyleSheet.create({
   filterText: { fontSize: 14, fontFamily: 'DMSans-Medium', color: '#6B7280' },
   filterTextActive: { color: '#F97316' },
   objektCard: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#FFFFFF', borderRadius: 16, padding: 12, marginBottom: 12, borderWidth: 1, borderColor: '#F3F4F6' },
-  objektImage: { width: 80, height: 80, borderRadius: 12, backgroundColor: '#F3F4F6', justifyContent: 'center', alignItems: 'center' },
+  objektImage: { width: 80, height: 80, borderRadius: 12, backgroundColor: '#F3F4F6', justifyContent: 'center', alignItems: 'center', position: 'relative' },
+  soldOverlay: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(34, 197, 94, 0.9)', borderRadius: 12, justifyContent: 'center', alignItems: 'center' },
+  soldOverlayText: { fontSize: 9, fontFamily: 'DMSans-Bold', color: '#FFFFFF' },
   objektContent: { flex: 1, marginLeft: 12 },
   objektHeader: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   objektName: { fontSize: 16, fontFamily: 'DMSans-SemiBold', color: '#111827' },
-  soldBadge: { backgroundColor: '#D1FAE5', paddingHorizontal: 8, paddingVertical: 2, borderRadius: 6 },
-  soldBadgeText: { fontSize: 10, fontFamily: 'DMSans-SemiBold', color: '#22C55E' },
+  simpliBadge: { flexDirection: 'row', alignItems: 'center', gap: 3, backgroundColor: '#FFF7ED', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 6 },
+  simpliBadgeText: { fontSize: 10, fontFamily: 'DMSans-SemiBold', color: '#F97316' },
   aiBadge: { width: 24, height: 24, borderRadius: 6, backgroundColor: '#FFF7ED', justifyContent: 'center', alignItems: 'center' },
   objektCity: { fontSize: 13, fontFamily: 'DMSans-Regular', color: '#6B7280', marginTop: 2 },
   objektDetails: { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 4 },
