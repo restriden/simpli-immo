@@ -170,52 +170,15 @@ async function sendConversationMessage(
   type: "SMS" | "WhatsApp"
 ): Promise<{ success: boolean; messageId?: string; conversationId?: string; data?: any; error?: string }> {
   try {
-    // First, get or create conversation for this contact
-    const conversationUrl = `${GHL_API_BASE}/conversations/search`;
-    const searchResponse = await fetch(conversationUrl, {
-      method: "GET",
-      headers,
-    });
+    // GHL API v2: Send message directly via /conversations/messages
+    // The API will create or use existing conversation automatically
+    const sendUrl = `${GHL_API_BASE}/conversations/messages`;
 
-    let conversationId: string | null = null;
-
-    // Try to find existing conversation
-    const searchParams = new URLSearchParams({
-      locationId,
-      contactId,
-    });
-
-    const findConvResponse = await fetch(
-      `${GHL_API_BASE}/conversations/search?${searchParams}`,
-      {
-        method: "GET",
-        headers,
-      }
-    );
-
-    if (findConvResponse.ok) {
-      const convData = await findConvResponse.json();
-      if (convData.conversations && convData.conversations.length > 0) {
-        conversationId = convData.conversations[0].id;
-        console.log("Found existing conversation:", conversationId);
-      }
-    }
-
-    // If no conversation found, create one or send directly
-    // Send message via the conversations/messages endpoint
-    const sendUrl = conversationId
-      ? `${GHL_API_BASE}/conversations/${conversationId}/messages`
-      : `${GHL_API_BASE}/conversations/messages`;
-
-    const messagePayload: any = {
-      type: type === "WhatsApp" ? "WhatsApp" : "SMS",
+    const messagePayload = {
+      type: type, // "SMS" or "WhatsApp"
+      contactId: contactId,
       message: message,
     };
-
-    // If no conversation, include contactId
-    if (!conversationId) {
-      messagePayload.contactId = contactId;
-    }
 
     console.log("Sending message to:", sendUrl);
     console.log("Payload:", JSON.stringify(messagePayload));
@@ -226,19 +189,29 @@ async function sendConversationMessage(
       body: JSON.stringify(messagePayload),
     });
 
+    const responseText = await sendResponse.text();
+    console.log("GHL response status:", sendResponse.status);
+    console.log("GHL response body:", responseText);
+
     if (!sendResponse.ok) {
-      const errorText = await sendResponse.text();
-      console.error("GHL send message error:", sendResponse.status, errorText);
-      return { success: false, error: `GHL API error: ${sendResponse.status}` };
+      console.error("GHL send message error:", sendResponse.status, responseText);
+
+      // Try to parse error for more details
+      try {
+        const errorData = JSON.parse(responseText);
+        return { success: false, error: errorData.message || errorData.error || `GHL API error: ${sendResponse.status}` };
+      } catch {
+        return { success: false, error: `GHL API error: ${sendResponse.status} - ${responseText}` };
+      }
     }
 
-    const result = await sendResponse.json();
+    const result = JSON.parse(responseText);
     console.log("GHL send result:", result);
 
     return {
       success: true,
       messageId: result.messageId || result.id,
-      conversationId: result.conversationId || conversationId,
+      conversationId: result.conversationId,
       data: result,
     };
   } catch (err) {
