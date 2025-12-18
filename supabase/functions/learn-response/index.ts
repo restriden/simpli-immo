@@ -185,6 +185,9 @@ Antworte NUR mit validem JSON:
 
         console.log('Updated existing knowledge:', existing[0].id);
 
+        // Sync to GHL
+        await syncKiWissenToGHL(lead_id, lead.objekt_id, actualUserId);
+
         return new Response(
           JSON.stringify({
             success: true,
@@ -246,6 +249,9 @@ Antworte NUR mit validem JSON:
         })
         .eq('id', questionMessage.id);
 
+      // Sync to GHL
+      await syncKiWissenToGHL(lead_id, lead.objekt_id, actualUserId);
+
       return new Response(
         JSON.stringify({
           success: true,
@@ -281,3 +287,28 @@ Antworte NUR mit validem JSON:
     );
   }
 });
+
+// Helper function to sync ki_wissen to GHL
+async function syncKiWissenToGHL(leadId: string, objektId: string | null, userId: string) {
+  try {
+    const syncUrl = `${SUPABASE_URL}/functions/v1/sync-ki-wissen`;
+
+    await fetch(syncUrl, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
+      },
+      body: JSON.stringify({
+        lead_id: leadId,
+        objekt_id: objektId,
+        user_id: userId,
+      }),
+    });
+
+    console.log('Triggered GHL sync for ki_wissen');
+  } catch (err) {
+    // Don't fail the main operation if sync fails
+    console.error('GHL sync error (non-blocking):', err);
+  }
+}
