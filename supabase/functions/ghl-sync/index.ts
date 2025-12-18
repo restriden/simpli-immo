@@ -8,6 +8,7 @@ const GHL_API_BASE = "https://services.leadconnectorhq.com";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") || "";
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || "";
+const ANTHROPIC_API_KEY = Deno.env.get("ANTHROPIC_API_KEY") || "";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -781,14 +782,22 @@ async function syncTasks(
 
           const isCompleted = task.status === "completed" || task.completed === true;
 
+          // Strip HTML first
+          const rawTitle = stripHtml(task.title || task.name) || "Aufgabe";
+          const rawDescription = stripHtml(task.description || task.body || task.notes);
+
+          // Translate to German if needed
+          const { translated: translatedTitle, wasTranslated: titleTranslated } = await translateToGerman(rawTitle);
+          const { translated: translatedDescription, wasTranslated: descTranslated } = await translateToGerman(rawDescription);
+
           const todoData = {
             user_id: connection.user_id,
             lead_id: lead.id,
             ghl_task_id: task.id,
             type: todoType,
             priority: priority,
-            title: stripHtml(task.title || task.name) || "Aufgabe",
-            subtitle: stripHtml(task.description || task.body || task.notes),
+            title: translatedTitle || "Aufgabe",
+            subtitle: translatedDescription,
             completed: isCompleted,
             due_date: task.dueDate || task.due_date || null,
             ghl_data: task,
@@ -810,6 +819,25 @@ async function syncTasks(
             await supabase
               .from("todos")
               .insert(todoData);
+          }
+
+          // If translated, update in GHL too
+          if ((titleTranslated || descTranslated) && lead.ghl_contact_id) {
+            try {
+              const updateUrl = `${GHL_API_BASE}/contacts/${lead.ghl_contact_id}/tasks/${task.id}`;
+              const updateBody: any = {};
+              if (titleTranslated) updateBody.title = translatedTitle;
+              if (descTranslated) updateBody.body = translatedDescription;
+
+              await fetch(updateUrl, {
+                method: "PUT",
+                headers,
+                body: JSON.stringify(updateBody),
+              });
+              console.log("Updated task in GHL with German translation");
+            } catch (ghlErr) {
+              console.error("Failed to update GHL task with translation:", ghlErr);
+            }
           }
 
           synced++;
@@ -863,6 +891,72 @@ function stripHtml(html: string | null | undefined): string | null {
     .replace(/&quot;/g, '"')
     .replace(/&#39;/g, "'")
     .trim() || null;
+}
+
+/**
+ * Translate text to German if not already German
+ * Returns { translated: string, wasTranslated: boolean }
+ */
+async function translateToGerman(text: string | null): Promise<{ translated: string | null; wasTranslated: boolean }> {
+  if (!text || text.trim().length < 3) {
+    return { translated: text, wasTranslated: false };
+  }
+
+  if (!ANTHROPIC_API_KEY) {
+    console.log("No Anthropic API key, skipping translation");
+    return { translated: text, wasTranslated: false };
+  }
+
+  try {
+    const response = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-api-key": ANTHROPIC_API_KEY,
+        "anthropic-version": "2023-06-01",
+      },
+      body: JSON.stringify({
+        model: "claude-3-haiku-20240307",
+        max_tokens: 500,
+        messages: [
+          {
+            role: "user",
+            content: `Analyze this text and respond with JSON only:
+1. Is this text already in German?
+2. If not German, translate it to German.
+
+Text: "${text}"
+
+Respond with this exact JSON format (no other text):
+{"isGerman": true/false, "translation": "German text here or original if already German"}`
+          }
+        ],
+      }),
+    });
+
+    if (!response.ok) {
+      console.error("Translation API error:", response.status);
+      return { translated: text, wasTranslated: false };
+    }
+
+    const data = await response.json();
+    const content = data.content?.[0]?.text || "";
+
+    // Parse JSON from response
+    const jsonMatch = content.match(/\{[\s\S]*\}/);
+    if (jsonMatch) {
+      const result = JSON.parse(jsonMatch[0]);
+      if (!result.isGerman && result.translation) {
+        console.log(`Translated: "${text}" -> "${result.translation}"`);
+        return { translated: result.translation, wasTranslated: true };
+      }
+    }
+
+    return { translated: text, wasTranslated: false };
+  } catch (error) {
+    console.error("Translation error:", error);
+    return { translated: text, wasTranslated: false };
+  }
 }
 
 function jsonResponse(data: any, status = 200): Response {
