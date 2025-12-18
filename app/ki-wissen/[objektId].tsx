@@ -8,12 +8,14 @@ import {
   StyleSheet,
   ActivityIndicator,
   Modal,
+  Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { Feather } from '@expo/vector-icons';
 import { useAuth } from '../../lib/auth';
 import { getObjekt, getKiWissen, createKiWissen, deleteKiWissen, Objekt, KiWissen } from '../../lib/database';
+import { supabase } from '../../lib/supabase';
 
 const kategorien = [
   { key: 'objekt', label: 'Objekt', icon: 'home', color: '#3B82F6' },
@@ -37,6 +39,7 @@ export default function KiWissenScreen() {
   const [newAntwort, setNewAntwort] = useState('');
   const [newKategorie, setNewKategorie] = useState('objekt');
   const [saving, setSaving] = useState(false);
+  const [syncing, setSyncing] = useState(false);
 
   useEffect(() => {
     loadData();
@@ -60,6 +63,46 @@ export default function KiWissenScreen() {
     }
   };
 
+  const syncToGHL = async () => {
+    if (!user?.id || !objektId) return;
+
+    setSyncing(true);
+    try {
+      const { data: session } = await supabase.auth.getSession();
+      if (!session?.session?.access_token) {
+        throw new Error('Not authenticated');
+      }
+
+      const response = await fetch(
+        `${process.env.EXPO_PUBLIC_SUPABASE_URL}/functions/v1/sync-ki-wissen`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${session.session.access_token}`,
+          },
+          body: JSON.stringify({
+            objekt_id: objektId,
+            user_id: user.id,
+          }),
+        }
+      );
+
+      const result = await response.json();
+
+      if (response.ok && result.success) {
+        Alert.alert('Sync erfolgreich', `${result.synced} Kontakte aktualisiert`);
+      } else {
+        throw new Error(result.error || 'Sync fehlgeschlagen');
+      }
+    } catch (error: any) {
+      console.error('Sync error:', error);
+      Alert.alert('Fehler', error.message || 'Sync fehlgeschlagen');
+    } finally {
+      setSyncing(false);
+    }
+  };
+
   const handleAddWissen = async () => {
     if (!newFrage.trim() || !newAntwort.trim() || !user?.id || !objektId) return;
 
@@ -80,6 +123,9 @@ export default function KiWissenScreen() {
         setModalVisible(false);
         setNewFrage('');
         setNewAntwort('');
+
+        // Auto-sync to GHL after adding
+        syncToGHL();
       }
     } catch (error) {
       console.error('Error creating ki-wissen:', error);
@@ -128,9 +174,22 @@ export default function KiWissenScreen() {
           <Text style={styles.headerTitle}>KI-Wissen</Text>
           {objekt && <Text style={styles.headerSubtitle}>{objekt.name}</Text>}
         </View>
-        <TouchableOpacity style={styles.addButton} onPress={() => setModalVisible(true)}>
-          <Feather name="plus" size={24} color="#F97316" />
-        </TouchableOpacity>
+        <View style={styles.headerButtons}>
+          <TouchableOpacity
+            style={[styles.syncButton, syncing && styles.syncButtonActive]}
+            onPress={syncToGHL}
+            disabled={syncing}
+          >
+            {syncing ? (
+              <ActivityIndicator size="small" color="#F97316" />
+            ) : (
+              <Feather name="refresh-cw" size={20} color="#F97316" />
+            )}
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.addButton} onPress={() => setModalVisible(true)}>
+            <Feather name="plus" size={24} color="#F97316" />
+          </TouchableOpacity>
+        </View>
       </View>
 
       {/* Info Banner */}
@@ -303,6 +362,9 @@ const styles = StyleSheet.create({
   headerContent: { flex: 1, marginLeft: 12 },
   headerTitle: { fontSize: 18, fontFamily: 'DMSans-SemiBold', color: '#111827' },
   headerSubtitle: { fontSize: 13, fontFamily: 'DMSans-Regular', color: '#6B7280', marginTop: 1 },
+  headerButtons: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  syncButton: { width: 40, height: 40, borderRadius: 12, backgroundColor: '#F3F4F6', justifyContent: 'center', alignItems: 'center' },
+  syncButtonActive: { backgroundColor: '#FFF7ED' },
   addButton: { width: 40, height: 40, borderRadius: 12, backgroundColor: '#FFF7ED', justifyContent: 'center', alignItems: 'center' },
   infoBanner: { flexDirection: 'row', alignItems: 'center', gap: 12, backgroundColor: '#FFF7ED', paddingHorizontal: 16, paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: '#FFEDD5' },
   infoText: { flex: 1, fontSize: 13, fontFamily: 'DMSans-Regular', color: '#92400E' },
