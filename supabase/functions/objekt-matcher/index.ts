@@ -129,7 +129,11 @@ async function handleMatch(supabase: any, params: any): Promise<Response> {
 
     if (createError) {
       console.error("Error creating objekt:", createError);
-      return jsonResponse({ error: "Failed to create objekt" }, 500);
+      return jsonResponse({
+        error: "Failed to create objekt",
+        details: createError.message,
+        code: createError.code,
+      }, 500);
     }
 
     result = {
@@ -263,10 +267,27 @@ async function handleMerge(supabase: any, params: any): Promise<Response> {
  * Extract objekt name from GHL contact data
  */
 function extractObjektName(contactData: any): string | null {
-  // Check customFields object
-  if (contactData.customFields) {
+  console.log("Extracting objekt from contact data keys:", Object.keys(contactData));
+
+  // GHL sends customFields as ARRAY: [{ "id": "xxx", "value": "..." }]
+  if (Array.isArray(contactData.customFields)) {
+    console.log("customFields is ARRAY with", contactData.customFields.length, "items");
+
+    // Look for first non-empty value (typically the objekttitel)
+    for (const field of contactData.customFields) {
+      if (field.value && typeof field.value === 'string' && field.value.trim()) {
+        console.log(`Found in customFields array (id: ${field.id}):`, field.value);
+        return field.value.trim();
+      }
+    }
+  }
+
+  // Check customFields as object (alternative format)
+  if (contactData.customFields && !Array.isArray(contactData.customFields)) {
+    console.log("customFields is OBJECT with keys:", Object.keys(contactData.customFields));
     for (const fieldName of OBJEKT_FIELD_NAMES) {
       if (contactData.customFields[fieldName]) {
+        console.log(`Found in customFields.${fieldName}:`, contactData.customFields[fieldName]);
         return contactData.customFields[fieldName].trim();
       }
     }
@@ -275,9 +296,30 @@ function extractObjektName(contactData: any): string | null {
     for (const [key, value] of Object.entries(contactData.customFields)) {
       const keyLower = key.toLowerCase();
       if (keyLower.includes('objekt') || keyLower.includes('property') ||
-          keyLower.includes('immobilie') || keyLower.includes('listing')) {
+          keyLower.includes('immobilie') || keyLower.includes('listing') ||
+          keyLower.includes('titel')) {
         if (typeof value === 'string' && value.trim()) {
+          console.log(`Found via iteration customFields.${key}:`, value);
           return value.trim();
+        }
+      }
+    }
+  }
+
+  // Check customField (singular) - GHL sometimes uses this
+  if (contactData.customField) {
+    console.log("customField found (singular):", typeof contactData.customField);
+    if (Array.isArray(contactData.customField)) {
+      for (const field of contactData.customField) {
+        if (field.value && typeof field.value === 'string' && field.value.trim()) {
+          return field.value.trim();
+        }
+      }
+    } else if (typeof contactData.customField === 'object') {
+      for (const fieldName of OBJEKT_FIELD_NAMES) {
+        if (contactData.customField[fieldName]) {
+          console.log(`Found in customField.${fieldName}:`, contactData.customField[fieldName]);
+          return contactData.customField[fieldName].trim();
         }
       }
     }

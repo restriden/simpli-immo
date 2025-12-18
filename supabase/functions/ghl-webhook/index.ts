@@ -338,7 +338,11 @@ async function handleContact(supabase: any, connection: any, payload: any) {
 
   // Auto-assign lead to objekt based on contact custom fields
   // Only if lead doesn't already have an objekt assigned
+  console.log("Checking objekt assignment - existing?.objekt_id:", existing?.objekt_id);
+  console.log("Contact customFields:", JSON.stringify(contact.customFields || contact.customField || 'none'));
+
   if (!existing?.objekt_id) {
+    console.log("No existing objekt_id, calling objekt-matcher...");
     try {
       const matcherUrl = `${Deno.env.get("SUPABASE_URL")}/functions/v1/objekt-matcher`;
       const matchResponse = await fetch(matcherUrl, {
@@ -355,8 +359,12 @@ async function handleContact(supabase: any, connection: any, payload: any) {
         }),
       });
 
+      const matchResultText = await matchResponse.text();
+      console.log("Objekt-matcher response status:", matchResponse.status);
+      console.log("Objekt-matcher response:", matchResultText);
+
       if (matchResponse.ok) {
-        const matchResult = await matchResponse.json();
+        const matchResult = JSON.parse(matchResultText);
         if (matchResult.action === 'matched') {
           console.log(`Auto-assigned lead to existing objekt: ${matchResult.objekt_name}`);
         } else if (matchResult.action === 'created') {
