@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { View, Text, ScrollView, TouchableOpacity, StyleSheet, RefreshControl, ActivityIndicator, Linking, Alert, Modal } from 'react-native';
+import { View, Text, ScrollView, TouchableOpacity, StyleSheet, RefreshControl, ActivityIndicator, Linking, Alert, Modal, TextInput, KeyboardAvoidingView, Platform } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useFocusEffect } from 'expo-router';
 import { Feather } from '@expo/vector-icons';
@@ -38,6 +38,18 @@ export default function LeadsScreen() {
   const [objekte, setObjekte] = useState<Objekt[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+
+  // Create contact modal state
+  const [showCreateModal, setShowCreateModal] = useState(false);
+  const [creating, setCreating] = useState(false);
+  const [newContact, setNewContact] = useState({
+    firstName: '',
+    lastName: '',
+    email: '',
+    phone: '',
+    objektId: null as string | null,
+  });
+  const [showObjektSelector, setShowObjektSelector] = useState(false);
 
   const loadLeads = async () => {
     if (!user?.id) {
@@ -144,6 +156,73 @@ export default function LeadsScreen() {
     if (finanzierungFilter === 'alle') return 'Finanzierung';
     if (finanzierungFilter === 'simpli') return 'Simpli Finance';
     return 'Extern fin.';
+  };
+
+  const resetCreateForm = () => {
+    setNewContact({
+      firstName: '',
+      lastName: '',
+      email: '',
+      phone: '',
+      objektId: null,
+    });
+    setShowObjektSelector(false);
+  };
+
+  const handleCreateContact = async () => {
+    if (!newContact.firstName.trim()) {
+      Alert.alert('Fehler', 'Bitte gib mindestens einen Vornamen ein.');
+      return;
+    }
+
+    setCreating(true);
+    try {
+      const { data: session } = await supabase.auth.getSession();
+      if (!session?.session?.access_token) {
+        throw new Error('Not authenticated');
+      }
+
+      const response = await fetch(
+        `${process.env.EXPO_PUBLIC_SUPABASE_URL}/functions/v1/ghl-create-contact`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${session.session.access_token}`,
+          },
+          body: JSON.stringify({
+            user_id: user?.id,
+            first_name: newContact.firstName.trim(),
+            last_name: newContact.lastName.trim() || undefined,
+            email: newContact.email.trim() || undefined,
+            phone: newContact.phone.trim() || undefined,
+            objekt_id: newContact.objektId || undefined,
+          }),
+        }
+      );
+
+      const result = await response.json();
+
+      if (!response.ok || !result.success) {
+        throw new Error(result.error || 'Kontakt konnte nicht erstellt werden');
+      }
+
+      Alert.alert('Erfolg', 'Kontakt wurde erstellt und mit GHL synchronisiert.');
+      setShowCreateModal(false);
+      resetCreateForm();
+      loadLeads();
+    } catch (error: any) {
+      console.error('Create contact error:', error);
+      Alert.alert('Fehler', error.message || 'Kontakt konnte nicht erstellt werden');
+    } finally {
+      setCreating(false);
+    }
+  };
+
+  const getSelectedObjektNameForCreate = () => {
+    if (!newContact.objektId) return 'Kein Objekt';
+    const obj = objekte.find(o => o.id === newContact.objektId);
+    return obj?.name || 'Kein Objekt';
   };
 
   if (loading) {
@@ -429,6 +508,178 @@ export default function LeadsScreen() {
           </View>
         </TouchableOpacity>
       </Modal>
+
+      {/* Create Contact Modal */}
+      <Modal
+        visible={showCreateModal}
+        transparent
+        animationType="slide"
+        onRequestClose={() => {
+          setShowCreateModal(false);
+          resetCreateForm();
+        }}
+      >
+        <KeyboardAvoidingView
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+          style={styles.createModalOverlay}
+        >
+          <View style={styles.createModalContent}>
+            <View style={styles.createModalHeader}>
+              <Text style={styles.createModalTitle}>Neuer Kontakt</Text>
+              <TouchableOpacity
+                onPress={() => {
+                  setShowCreateModal(false);
+                  resetCreateForm();
+                }}
+              >
+                <Feather name="x" size={24} color="#6B7280" />
+              </TouchableOpacity>
+            </View>
+
+            <ScrollView style={styles.createFormScroll} showsVerticalScrollIndicator={false}>
+              {/* First Name */}
+              <View style={styles.inputGroup}>
+                <Text style={styles.inputLabel}>Vorname *</Text>
+                <TextInput
+                  style={styles.textInput}
+                  value={newContact.firstName}
+                  onChangeText={(text) => setNewContact({ ...newContact, firstName: text })}
+                  placeholder="Max"
+                  placeholderTextColor="#9CA3AF"
+                  autoCapitalize="words"
+                />
+              </View>
+
+              {/* Last Name */}
+              <View style={styles.inputGroup}>
+                <Text style={styles.inputLabel}>Nachname</Text>
+                <TextInput
+                  style={styles.textInput}
+                  value={newContact.lastName}
+                  onChangeText={(text) => setNewContact({ ...newContact, lastName: text })}
+                  placeholder="Mustermann"
+                  placeholderTextColor="#9CA3AF"
+                  autoCapitalize="words"
+                />
+              </View>
+
+              {/* Email */}
+              <View style={styles.inputGroup}>
+                <Text style={styles.inputLabel}>E-Mail</Text>
+                <TextInput
+                  style={styles.textInput}
+                  value={newContact.email}
+                  onChangeText={(text) => setNewContact({ ...newContact, email: text })}
+                  placeholder="max@example.com"
+                  placeholderTextColor="#9CA3AF"
+                  keyboardType="email-address"
+                  autoCapitalize="none"
+                />
+              </View>
+
+              {/* Phone */}
+              <View style={styles.inputGroup}>
+                <Text style={styles.inputLabel}>Telefon</Text>
+                <TextInput
+                  style={styles.textInput}
+                  value={newContact.phone}
+                  onChangeText={(text) => setNewContact({ ...newContact, phone: text })}
+                  placeholder="+49 170 1234567"
+                  placeholderTextColor="#9CA3AF"
+                  keyboardType="phone-pad"
+                />
+              </View>
+
+              {/* Objekt Selector */}
+              <View style={styles.inputGroup}>
+                <Text style={styles.inputLabel}>Objekt (optional)</Text>
+                <TouchableOpacity
+                  style={styles.selectorButton}
+                  onPress={() => setShowObjektSelector(!showObjektSelector)}
+                >
+                  <Text style={[
+                    styles.selectorButtonText,
+                    newContact.objektId && styles.selectorButtonTextSelected
+                  ]}>
+                    {getSelectedObjektNameForCreate()}
+                  </Text>
+                  <Feather
+                    name={showObjektSelector ? "chevron-up" : "chevron-down"}
+                    size={18}
+                    color="#6B7280"
+                  />
+                </TouchableOpacity>
+
+                {showObjektSelector && (
+                  <View style={styles.objektSelectorList}>
+                    <TouchableOpacity
+                      style={[styles.objektSelectorItem, !newContact.objektId && styles.objektSelectorItemActive]}
+                      onPress={() => {
+                        setNewContact({ ...newContact, objektId: null });
+                        setShowObjektSelector(false);
+                      }}
+                    >
+                      <Text style={styles.objektSelectorText}>Kein Objekt</Text>
+                      {!newContact.objektId && <Feather name="check" size={16} color="#F97316" />}
+                    </TouchableOpacity>
+                    {objekte.map(obj => (
+                      <TouchableOpacity
+                        key={obj.id}
+                        style={[styles.objektSelectorItem, newContact.objektId === obj.id && styles.objektSelectorItemActive]}
+                        onPress={() => {
+                          setNewContact({ ...newContact, objektId: obj.id });
+                          setShowObjektSelector(false);
+                        }}
+                      >
+                        <Text style={styles.objektSelectorText} numberOfLines={1}>{obj.name}</Text>
+                        {newContact.objektId === obj.id && <Feather name="check" size={16} color="#F97316" />}
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+                )}
+              </View>
+
+              <View style={{ height: 20 }} />
+            </ScrollView>
+
+            {/* Actions */}
+            <View style={styles.createModalActions}>
+              <TouchableOpacity
+                style={styles.cancelBtn}
+                onPress={() => {
+                  setShowCreateModal(false);
+                  resetCreateForm();
+                }}
+              >
+                <Text style={styles.cancelBtnText}>Abbrechen</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.createBtn, creating && styles.createBtnDisabled]}
+                onPress={handleCreateContact}
+                disabled={creating}
+              >
+                {creating ? (
+                  <ActivityIndicator size="small" color="#FFFFFF" />
+                ) : (
+                  <>
+                    <Feather name="user-plus" size={18} color="#FFFFFF" />
+                    <Text style={styles.createBtnText}>Erstellen</Text>
+                  </>
+                )}
+              </TouchableOpacity>
+            </View>
+          </View>
+        </KeyboardAvoidingView>
+      </Modal>
+
+      {/* FAB */}
+      <TouchableOpacity
+        style={styles.fab}
+        onPress={() => setShowCreateModal(true)}
+        activeOpacity={0.8}
+      >
+        <Feather name="user-plus" size={24} color="#FFFFFF" />
+      </TouchableOpacity>
     </SafeAreaView>
   );
 }
@@ -680,5 +931,151 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     justifyContent: 'center',
     alignItems: 'center',
+  },
+  // FAB
+  fab: {
+    position: 'absolute',
+    bottom: 100,
+    right: 20,
+    width: 56,
+    height: 56,
+    borderRadius: 16,
+    backgroundColor: '#F97316',
+    justifyContent: 'center',
+    alignItems: 'center',
+    shadowColor: '#F97316',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 8,
+  },
+  // Create Modal Styles
+  createModalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    justifyContent: 'flex-end',
+  },
+  createModalContent: {
+    backgroundColor: '#FFFFFF',
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    paddingTop: 20,
+    paddingHorizontal: 20,
+    paddingBottom: 34,
+    maxHeight: '85%',
+  },
+  createModalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 20,
+  },
+  createModalTitle: {
+    fontSize: 20,
+    fontFamily: 'DMSans-Bold',
+    color: '#111827',
+  },
+  createFormScroll: {
+    maxHeight: 400,
+  },
+  inputGroup: {
+    marginBottom: 16,
+  },
+  inputLabel: {
+    fontSize: 14,
+    fontFamily: 'DMSans-Medium',
+    color: '#374151',
+    marginBottom: 8,
+  },
+  textInput: {
+    backgroundColor: '#F9FAFB',
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+    borderRadius: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    fontSize: 16,
+    fontFamily: 'DMSans-Regular',
+    color: '#111827',
+  },
+  selectorButton: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    backgroundColor: '#F9FAFB',
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+    borderRadius: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+  },
+  selectorButtonText: {
+    fontSize: 16,
+    fontFamily: 'DMSans-Regular',
+    color: '#9CA3AF',
+  },
+  selectorButtonTextSelected: {
+    color: '#111827',
+  },
+  objektSelectorList: {
+    marginTop: 8,
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+    borderRadius: 12,
+    maxHeight: 200,
+  },
+  objektSelectorItem: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: '#F3F4F6',
+  },
+  objektSelectorItemActive: {
+    backgroundColor: '#FFF7ED',
+  },
+  objektSelectorText: {
+    fontSize: 15,
+    fontFamily: 'DMSans-Regular',
+    color: '#374151',
+    flex: 1,
+  },
+  createModalActions: {
+    flexDirection: 'row',
+    gap: 12,
+    marginTop: 16,
+  },
+  cancelBtn: {
+    flex: 1,
+    paddingVertical: 14,
+    borderRadius: 12,
+    backgroundColor: '#F3F4F6',
+    alignItems: 'center',
+  },
+  cancelBtnText: {
+    fontSize: 16,
+    fontFamily: 'DMSans-SemiBold',
+    color: '#6B7280',
+  },
+  createBtn: {
+    flex: 1,
+    flexDirection: 'row',
+    gap: 8,
+    paddingVertical: 14,
+    borderRadius: 12,
+    backgroundColor: '#F97316',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  createBtnDisabled: {
+    opacity: 0.6,
+  },
+  createBtnText: {
+    fontSize: 16,
+    fontFamily: 'DMSans-SemiBold',
+    color: '#FFFFFF',
   },
 });
