@@ -9,12 +9,14 @@ import {
   ActivityIndicator,
   KeyboardAvoidingView,
   Platform,
+  Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { Feather } from '@expo/vector-icons';
 import { useAuth } from '../../lib/auth';
 import { getLead, getMessages, sendMessage, Lead, Message } from '../../lib/database';
+import { sendGHLMessage, subscribeToMessages, checkGHLConnection } from '../../lib/ghl';
 
 const statusLabels: Record<string, { label: string; color: string; bg: string }> = {
   neu: { label: 'Neu', color: '#3B82F6', bg: '#DBEAFE' },
@@ -38,10 +40,45 @@ export default function ChatScreen() {
   const [newMessage, setNewMessage] = useState('');
   const [loading, setLoading] = useState(true);
   const [sending, setSending] = useState(false);
+  const [ghlConnected, setGhlConnected] = useState(false);
+  const [messageType, setMessageType] = useState<'WhatsApp' | 'SMS' | 'Email'>('WhatsApp');
 
+  // Load data and check GHL connection
   useEffect(() => {
     loadData();
+    checkGHL();
+  }, [leadId, user?.id]);
+
+  // Subscribe to real-time message updates
+  useEffect(() => {
+    if (!leadId) return;
+
+    console.log('[CHAT] Setting up real-time subscription for lead:', leadId);
+    const unsubscribe = subscribeToMessages(leadId, (newMsg) => {
+      console.log('[CHAT] Received real-time message:', newMsg);
+      setMessages(prev => {
+        // Avoid duplicates
+        if (prev.some(m => m.id === newMsg.id || m.ghl_message_id === newMsg.ghl_message_id)) {
+          return prev;
+        }
+        return [...prev, newMsg];
+      });
+      setTimeout(() => {
+        scrollViewRef.current?.scrollToEnd({ animated: true });
+      }, 100);
+    });
+
+    return () => {
+      console.log('[CHAT] Cleaning up real-time subscription');
+      unsubscribe();
+    };
   }, [leadId]);
+
+  const checkGHL = async () => {
+    if (!user?.id) return;
+    const connection = await checkGHLConnection(user.id);
+    setGhlConnected(!!connection);
+  };
 
   const loadData = async () => {
     if (!leadId) return;
@@ -65,23 +102,54 @@ export default function ChatScreen() {
     if (!newMessage.trim() || !user?.id || !leadId) return;
 
     setSending(true);
-    try {
-      const message = await sendMessage({
-        lead_id: leadId,
-        user_id: user.id,
-        content: newMessage.trim(),
-        type: 'outgoing',
-      });
+    const messageContent = newMessage.trim();
+    setNewMessage(''); // Clear immediately for better UX
 
-      if (message) {
-        setMessages(prev => [...prev, message]);
-        setNewMessage('');
-        setTimeout(() => {
-          scrollViewRef.current?.scrollToEnd({ animated: true });
-        }, 100);
+    try {
+      // If GHL is connected and lead has ghl_contact_id, send via GHL
+      if (ghlConnected && lead?.ghl_contact_id) {
+        console.log('[CHAT] Sending via GHL:', messageType);
+        const result = await sendGHLMessage(user.id, leadId, messageContent, messageType);
+
+        if (!result.success) {
+          Alert.alert('Fehler', result.error || 'Nachricht konnte nicht gesendet werden');
+          setNewMessage(messageContent); // Restore message on error
+          return;
+        }
+
+        // Message will appear via real-time subscription
+        // But also add it immediately for better UX
+        const optimisticMessage: Message = {
+          id: result.messageId || `temp_${Date.now()}`,
+          lead_id: leadId,
+          user_id: user.id,
+          content: messageContent,
+          type: 'outgoing',
+          is_template: false,
+          created_at: new Date().toISOString(),
+        };
+        setMessages(prev => [...prev, optimisticMessage]);
+      } else {
+        // Fallback: Save locally only
+        const message = await sendMessage({
+          lead_id: leadId,
+          user_id: user.id,
+          content: messageContent,
+          type: 'outgoing',
+        });
+
+        if (message) {
+          setMessages(prev => [...prev, message]);
+        }
       }
+
+      setTimeout(() => {
+        scrollViewRef.current?.scrollToEnd({ animated: true });
+      }, 100);
     } catch (error) {
       console.error('Error sending message:', error);
+      Alert.alert('Fehler', 'Nachricht konnte nicht gesendet werden');
+      setNewMessage(messageContent); // Restore message on error
     } finally {
       setSending(false);
     }
@@ -171,6 +239,12 @@ export default function ChatScreen() {
             <Feather name="credit-card" size={12} color="#6B7280" /> {lead.finanzierung_status}
           </Text>
         )}
+        {ghlConnected && lead.ghl_contact_id && (
+          <View style={styles.ghlBadge}>
+            <Feather name="zap" size={12} color="#22C55E" />
+            <Text style={styles.ghlBadgeText}>GHL</Text>
+          </View>
+        )}
       </View>
 
       <KeyboardAvoidingView
@@ -238,10 +312,36 @@ export default function ChatScreen() {
 
         {/* Input */}
         <View style={styles.inputContainer}>
+          {/* Channel Selector - only show when GHL connected */}
+          {ghlConnected && lead?.ghl_contact_id && (
+            <View style={styles.channelSelector}>
+              <TouchableOpacity
+                style={[styles.channelButton, messageType === 'WhatsApp' && styles.channelButtonActive]}
+                onPress={() => setMessageType('WhatsApp')}
+              >
+                <Feather name="message-circle" size={14} color={messageType === 'WhatsApp' ? '#FFFFFF' : '#6B7280'} />
+                <Text style={[styles.channelButtonText, messageType === 'WhatsApp' && styles.channelButtonTextActive]}>WhatsApp</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.channelButton, messageType === 'SMS' && styles.channelButtonActive]}
+                onPress={() => setMessageType('SMS')}
+              >
+                <Feather name="smartphone" size={14} color={messageType === 'SMS' ? '#FFFFFF' : '#6B7280'} />
+                <Text style={[styles.channelButtonText, messageType === 'SMS' && styles.channelButtonTextActive]}>SMS</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.channelButton, messageType === 'Email' && styles.channelButtonActive]}
+                onPress={() => setMessageType('Email')}
+              >
+                <Feather name="mail" size={14} color={messageType === 'Email' ? '#FFFFFF' : '#6B7280'} />
+                <Text style={[styles.channelButtonText, messageType === 'Email' && styles.channelButtonTextActive]}>Email</Text>
+              </TouchableOpacity>
+            </View>
+          )}
           <View style={styles.inputWrapper}>
             <TextInput
               style={styles.textInput}
-              placeholder="Nachricht schreiben..."
+              placeholder={ghlConnected ? `${messageType} schreiben...` : "Nachricht schreiben..."}
               placeholderTextColor="#9CA3AF"
               value={newMessage}
               onChangeText={setNewMessage}
@@ -282,6 +382,8 @@ const styles = StyleSheet.create({
   statusBadge: { paddingHorizontal: 10, paddingVertical: 4, borderRadius: 6 },
   statusText: { fontSize: 12, fontFamily: 'DMSans-SemiBold' },
   finanzierungStatus: { fontSize: 12, fontFamily: 'DMSans-Regular', color: '#6B7280' },
+  ghlBadge: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 8, paddingVertical: 4, borderRadius: 6, backgroundColor: '#D1FAE5', marginLeft: 'auto' },
+  ghlBadgeText: { fontSize: 11, fontFamily: 'DMSans-SemiBold', color: '#22C55E' },
   keyboardView: { flex: 1 },
   messagesContainer: { flex: 1 },
   messagesContent: { padding: 16, paddingBottom: 20 },
@@ -303,6 +405,11 @@ const styles = StyleSheet.create({
   outgoingTime: { color: 'rgba(255,255,255,0.7)', textAlign: 'right' },
   incomingTime: { color: '#9CA3AF' },
   inputContainer: { backgroundColor: '#FFFFFF', paddingHorizontal: 16, paddingVertical: 12, borderTopWidth: 1, borderTopColor: '#F3F4F6' },
+  channelSelector: { flexDirection: 'row', gap: 8, marginBottom: 10 },
+  channelButton: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 12, paddingVertical: 6, borderRadius: 16, backgroundColor: '#F3F4F6' },
+  channelButtonActive: { backgroundColor: '#F97316' },
+  channelButtonText: { fontSize: 12, fontFamily: 'DMSans-Medium', color: '#6B7280' },
+  channelButtonTextActive: { color: '#FFFFFF' },
   inputWrapper: { flexDirection: 'row', alignItems: 'flex-end', backgroundColor: '#F3F4F6', borderRadius: 24, paddingLeft: 16, paddingRight: 4, paddingVertical: 4 },
   textInput: { flex: 1, fontSize: 15, fontFamily: 'DMSans-Regular', color: '#111827', maxHeight: 100, paddingVertical: 8 },
   sendButton: { width: 40, height: 40, borderRadius: 20, backgroundColor: '#F97316', justifyContent: 'center', alignItems: 'center' },
