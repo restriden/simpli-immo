@@ -274,7 +274,7 @@ export default function ChatScreen() {
           <Feather name="arrow-left" size={24} color="#111827" />
         </TouchableOpacity>
 
-        <TouchableOpacity style={styles.headerContent}>
+        <TouchableOpacity style={styles.headerContent} onPress={() => router.push(`/lead/${leadId}`)}>
           <View style={styles.headerInfo}>
             <View style={styles.headerNameRow}>
               <Text style={styles.headerName}>{lead.name}</Text>
