@@ -47,6 +47,7 @@ export default function HomeScreen() {
   const [newTaskPriority, setNewTaskPriority] = useState('normal');
   const [creating, setCreating] = useState(false);
   const [refreshStatus, setRefreshStatus] = useState('');
+  const [isSyncing, setIsSyncing] = useState(false);
 
   const firstName = profile?.full_name?.split(' ')[0] || 'Makler';
 
@@ -164,22 +165,37 @@ export default function HomeScreen() {
   const onRefresh = async () => {
     if (!user?.id) return;
 
+    // If already syncing, just show status
+    if (isSyncing) {
+      setRefreshing(true);
+      setRefreshStatus('Lädt noch...');
+      setTimeout(() => setRefreshing(false), 1500);
+      return;
+    }
+
     setRefreshing(true);
-    setRefreshStatus('Synchronisiere mit GHL...');
+    setIsSyncing(true);
+    setRefreshStatus('Prüfe neue Aufgaben & Übersetzungen...');
+
+    // Hide refresh indicator after 3 seconds max
+    const hideRefresh = setTimeout(() => {
+      setRefreshing(false);
+      setRefreshStatus('');
+    }, 3000);
 
     try {
-      // Sync tasks from GHL (includes translation)
-      setRefreshStatus('Prüfe neue Aufgaben & Übersetzungen...');
+      // Sync tasks from GHL (includes translation) - runs in background if needed
       await syncGHLData(user.id, 'tasks');
 
       // Reload local data
-      setRefreshStatus('Lade Daten...');
       await loadData();
     } catch (error) {
       console.error('Refresh error:', error);
     } finally {
+      clearTimeout(hideRefresh);
       setRefreshStatus('');
       setRefreshing(false);
+      setIsSyncing(false);
     }
   };
 
