@@ -827,14 +827,28 @@ async function syncTasks(
               const updateUrl = `${GHL_API_BASE}/contacts/${lead.ghl_contact_id}/tasks/${task.id}`;
               const updateBody: any = {};
               if (titleTranslated) updateBody.title = translatedTitle;
-              if (descTranslated) updateBody.body = translatedDescription;
+              if (descTranslated) {
+                updateBody.body = translatedDescription;
+                updateBody.description = translatedDescription; // Try both field names
+              }
 
-              await fetch(updateUrl, {
+              console.log("Updating GHL task:", updateUrl, JSON.stringify(updateBody));
+
+              const ghlResponse = await fetch(updateUrl, {
                 method: "PUT",
-                headers,
+                headers: {
+                  ...headers,
+                  "Content-Type": "application/json",
+                },
                 body: JSON.stringify(updateBody),
               });
-              console.log("Updated task in GHL with German translation");
+
+              if (ghlResponse.ok) {
+                console.log("Updated task in GHL with German translation");
+              } else {
+                const errorText = await ghlResponse.text();
+                console.error("GHL task update failed:", ghlResponse.status, errorText);
+              }
             } catch (ghlErr) {
               console.error("Failed to update GHL task with translation:", ghlErr);
             }
@@ -921,14 +935,20 @@ async function translateToGerman(text: string | null): Promise<{ translated: str
         messages: [
           {
             role: "user",
-            content: `Analyze this text and respond with JSON only:
-1. Is this text already in German?
-2. If not German, translate it to German.
+            content: `Du bist ein Übersetzer für eine Immobilien-App. Analysiere diesen Text einer Aufgabe/To-Do:
 
 Text: "${text}"
 
-Respond with this exact JSON format (no other text):
-{"isGerman": true/false, "translation": "German text here or original if already German"}`
+Regeln:
+1. Prüfe ob der Text bereits auf Deutsch ist
+2. Wenn nicht Deutsch, übersetze SINNGEMÄSS (nicht wörtlich!) ins Deutsche
+3. Behalte den geschäftlichen Kontext bei (Immobilien, Kunden, Makler)
+4. "Let's go" → "Los geht's" oder "Starten" (NICHT "Lass los")
+5. "Call back" → "Rückruf" (NICHT "Zurückrufen")
+6. Kurze, professionelle Formulierungen bevorzugen
+
+Antworte NUR mit diesem JSON (kein anderer Text):
+{"isGerman": true/false, "translation": "Deutsche Übersetzung oder Original wenn bereits Deutsch"}`
           }
         ],
       }),
