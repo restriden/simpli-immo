@@ -41,10 +41,10 @@ serve(async (req) => {
 
     const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
 
-    // 1. Get the lead with objekt info
+    // 1. Get the lead with objekt info (including user_id for FK constraint)
     const { data: lead } = await supabase
       .from('leads')
-      .select('id, name, objekt_id, objekt:objekte(id, name)')
+      .select('id, name, user_id, objekt_id, objekt:objekte(id, name)')
       .eq('id', lead_id)
       .single();
 
@@ -155,11 +155,14 @@ Antworte NUR mit validem JSON:
     if (analysis.should_learn && analysis.knowledge_type !== 'keine') {
       const isObjektSpecific = analysis.knowledge_type === 'objekt_spezifisch';
 
+      // Use lead.user_id (from DB) instead of request parameter to ensure FK constraint
+      const actualUserId = lead.user_id;
+
       // Check if similar knowledge already exists
       const existingQuery = supabase
         .from('ki_wissen')
         .select('id, frage, antwort')
-        .eq('user_id', user_id)
+        .eq('user_id', actualUserId)
         .ilike('frage', `%${analysis.question_formatted.substring(0, 20)}%`);
 
       if (isObjektSpecific && lead.objekt_id) {
@@ -201,11 +204,13 @@ Antworte NUR mit validem JSON:
       const { data: newKnowledge, error: insertError } = await supabase
         .from('ki_wissen')
         .insert({
-          user_id: user_id,
+          user_id: actualUserId,
           objekt_id: isObjektSpecific ? lead.objekt_id : null,
           kategorie: analysis.category,
           frage: analysis.question_formatted,
           antwort: analysis.answer_formatted,
+          quelle: 'auto_learned',
+          is_auto_learned: true,
         })
         .select()
         .single();
@@ -213,7 +218,13 @@ Antworte NUR mit validem JSON:
       if (insertError) {
         console.error('Failed to save knowledge:', insertError);
         return new Response(
-          JSON.stringify({ success: false, error: "Failed to save knowledge" }),
+          JSON.stringify({
+            success: false,
+            error: "Failed to save knowledge",
+            details: insertError.message,
+            code: insertError.code,
+            hint: insertError.hint,
+          }),
           { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
         );
       }
