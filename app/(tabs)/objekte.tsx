@@ -143,7 +143,7 @@ export default function ObjekteScreen() {
           )}
           <TouchableOpacity
             style={styles.addButton}
-            onPress={() => router.push('/magic-upload')}
+            onPress={() => router.push('/objekt-erstellen')}
           >
             <Feather name="plus" size={24} color="#F97316" />
           </TouchableOpacity>
@@ -158,24 +158,6 @@ export default function ObjekteScreen() {
           <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
         }
       >
-        <TouchableOpacity 
-          style={styles.magicCard}
-          onPress={() => router.push('/magic-upload')}
-        >
-          <View style={styles.magicIconContainer}>
-            <Feather name="upload" size={24} color="#FFFFFF" />
-          </View>
-          <View style={styles.magicContent}>
-            <Text style={styles.magicTitle}>Magic Upload</Text>
-            <Text style={styles.magicSubtitle}>
-              Lade Exposé hoch – KI extrahiert alle Daten
-            </Text>
-          </View>
-          <View style={styles.magicArrow}>
-            <Feather name="arrow-right" size={20} color="#FFFFFF" />
-          </View>
-        </TouchableOpacity>
-
         <View style={styles.filterContainer}>
           {['alle', 'aktiv', 'verkauft'].map((f) => (
             <TouchableOpacity
@@ -197,14 +179,14 @@ export default function ObjekteScreen() {
             </View>
             <Text style={styles.emptyTitle}>Noch keine Objekte</Text>
             <Text style={styles.emptyText}>
-              Lade ein Exposé hoch oder erstelle ein Objekt manuell.
+              Erstelle ein neues Objekt und füge Infos hinzu.
             </Text>
-            <TouchableOpacity 
+            <TouchableOpacity
               style={styles.emptyButton}
-              onPress={() => router.push('/magic-upload')}
+              onPress={() => router.push('/objekt-erstellen')}
             >
-              <Feather name="upload" size={18} color="#FFFFFF" />
-              <Text style={styles.emptyButtonText}>Exposé hochladen</Text>
+              <Feather name="plus" size={18} color="#FFFFFF" />
+              <Text style={styles.emptyButtonText}>Objekt erstellen</Text>
             </TouchableOpacity>
           </View>
         )}
@@ -399,12 +381,6 @@ const styles = StyleSheet.create({
   addButton: { width: 44, height: 44, borderRadius: 12, backgroundColor: '#FFF7ED', justifyContent: 'center', alignItems: 'center' },
   scrollView: { flex: 1 },
   scrollContent: { paddingHorizontal: 20 },
-  magicCard: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#F97316', borderRadius: 16, padding: 16, marginBottom: 20 },
-  magicIconContainer: { width: 48, height: 48, borderRadius: 12, backgroundColor: 'rgba(255,255,255,0.2)', justifyContent: 'center', alignItems: 'center' },
-  magicContent: { flex: 1, marginLeft: 12 },
-  magicTitle: { fontSize: 16, fontFamily: 'DMSans-SemiBold', color: '#FFFFFF' },
-  magicSubtitle: { fontSize: 13, fontFamily: 'DMSans-Regular', color: 'rgba(255,255,255,0.8)', marginTop: 2 },
-  magicArrow: { width: 36, height: 36, borderRadius: 10, backgroundColor: 'rgba(255,255,255,0.2)', justifyContent: 'center', alignItems: 'center' },
   filterContainer: { flexDirection: 'row', gap: 8, marginBottom: 20 },
   filterTab: { paddingHorizontal: 16, paddingVertical: 8, borderRadius: 20, backgroundColor: '#F3F4F6' },
   filterTabActive: { backgroundColor: '#FFF7ED' },

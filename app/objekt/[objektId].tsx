@@ -231,10 +231,24 @@ export default function ObjektDetailScreen() {
         <View style={styles.actionsSection}>
           <TouchableOpacity
             style={styles.actionButton}
-            onPress={() => router.push(`/ki-wissen/${objektId}`)}
+            onPress={() => router.push(`/magic-upload?objektId=${objektId}`)}
           >
             <View style={[styles.actionIcon, { backgroundColor: '#FFF7ED' }]}>
-              <Feather name="book-open" size={20} color="#F97316" />
+              <Feather name="upload" size={20} color="#F97316" />
+            </View>
+            <View style={styles.actionContent}>
+              <Text style={styles.actionTitle}>Magic Upload</Text>
+              <Text style={styles.actionSubtitle}>Exposé oder Dokumente scannen</Text>
+            </View>
+            <Feather name="chevron-right" size={20} color="#D1D5DB" />
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={[styles.actionButton, { marginTop: 10 }]}
+            onPress={() => router.push(`/ki-wissen/${objektId}`)}
+          >
+            <View style={[styles.actionIcon, { backgroundColor: '#DBEAFE' }]}>
+              <Feather name="book-open" size={20} color="#3B82F6" />
             </View>
             <View style={styles.actionContent}>
               <Text style={styles.actionTitle}>KI-Wissen</Text>
