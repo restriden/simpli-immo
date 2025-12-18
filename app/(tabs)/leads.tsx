@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { View, Text, ScrollView, TouchableOpacity, StyleSheet, RefreshControl, ActivityIndicator } from 'react-native';
+import { View, Text, ScrollView, TouchableOpacity, StyleSheet, RefreshControl, ActivityIndicator, Linking, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useFocusEffect } from 'expo-router';
 import { Feather } from '@expo/vector-icons';
@@ -150,42 +150,75 @@ export default function LeadsScreen() {
 
         {filteredLeads.map(lead => {
           const status = statusLabels[lead.status] || statusLabels.neu;
+
+          const handleCall = () => {
+            if (!lead.phone) {
+              Alert.alert('Keine Telefonnummer', 'Für diesen Kontakt ist keine Telefonnummer hinterlegt.');
+              return;
+            }
+            Linking.openURL(`tel:${lead.phone}`);
+          };
+
+          const handleWhatsApp = () => {
+            if (!lead.phone) {
+              Alert.alert('Keine Telefonnummer', 'Für diesen Kontakt ist keine Telefonnummer hinterlegt.');
+              return;
+            }
+            const phone = lead.phone.replace(/\D/g, '');
+            Linking.openURL(`whatsapp://send?phone=${phone}`);
+          };
+
           return (
-            <TouchableOpacity 
-              key={lead.id} 
-              style={styles.leadCard}
-              onPress={() => router.push(`/chat/${lead.id}`)}
-            >
-              <View style={styles.leadAvatar}>
-                <Text style={styles.leadAvatarText}>
-                  {lead.name.split(' ').map(n => n[0]).join('').toUpperCase()}
-                </Text>
-              </View>
-              
-              <View style={styles.leadContent}>
-                <View style={styles.leadHeader}>
-                  <Text style={styles.leadName}>{lead.name}</Text>
-                  {lead.source === 'simpli' && (
-                    <View style={styles.simpliBadge}>
-                      <Feather name="zap" size={10} color="#F97316" />
-                    </View>
-                  )}
-                </View>
-                {lead.objekt && (
-                  <Text style={styles.leadObjekt}>
-                    <Feather name="home" size={12} color="#9CA3AF" /> {lead.objekt.name}
+            <View key={lead.id} style={styles.leadCard}>
+              <TouchableOpacity
+                style={styles.leadMainContent}
+                onPress={() => router.push(`/lead/${lead.id}`)}
+                activeOpacity={0.7}
+              >
+                <View style={styles.leadAvatar}>
+                  <Text style={styles.leadAvatarText}>
+                    {lead.name.split(' ').map(n => n[0]).join('').toUpperCase()}
                   </Text>
-                )}
-                <View style={styles.leadFooter}>
-                  <View style={[styles.statusBadge, { backgroundColor: status.bg }]}>
-                    <Text style={[styles.statusText, { color: status.color }]}>{status.label}</Text>
-                  </View>
-                  <Text style={styles.leadTime}>{formatTimeAgo(lead.updated_at)}</Text>
                 </View>
+
+                <View style={styles.leadContent}>
+                  <View style={styles.leadHeader}>
+                    <Text style={styles.leadName}>{lead.name}</Text>
+                    {lead.source === 'simpli' && (
+                      <View style={styles.simpliBadge}>
+                        <Feather name="zap" size={10} color="#F97316" />
+                      </View>
+                    )}
+                  </View>
+                  {lead.objekt && (
+                    <Text style={styles.leadObjekt}>
+                      <Feather name="home" size={12} color="#9CA3AF" /> {lead.objekt.name}
+                    </Text>
+                  )}
+                  <View style={styles.leadFooter}>
+                    <View style={[styles.statusBadge, { backgroundColor: status.bg }]}>
+                      <Text style={[styles.statusText, { color: status.color }]}>{status.label}</Text>
+                    </View>
+                    <Text style={styles.leadTime}>{formatTimeAgo(lead.updated_at)}</Text>
+                  </View>
+                </View>
+              </TouchableOpacity>
+
+              <View style={styles.leadActions}>
+                <TouchableOpacity style={styles.actionBtn} onPress={handleCall}>
+                  <Feather name="phone" size={18} color="#22C55E" />
+                </TouchableOpacity>
+                <TouchableOpacity style={styles.actionBtn} onPress={handleWhatsApp}>
+                  <Feather name="message-circle" size={18} color="#25D366" />
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={styles.actionBtnArrow}
+                  onPress={() => router.push(`/lead/${lead.id}`)}
+                >
+                  <Feather name="chevron-right" size={20} color="#9CA3AF" />
+                </TouchableOpacity>
               </View>
-              
-              <Feather name="chevron-right" size={20} color="#D1D5DB" />
-            </TouchableOpacity>
+            </View>
           );
         })}
 
@@ -217,7 +250,18 @@ const styles = StyleSheet.create({
   emptyIcon: { width: 80, height: 80, borderRadius: 20, backgroundColor: '#F3F4F6', justifyContent: 'center', alignItems: 'center', marginBottom: 16 },
   emptyTitle: { fontSize: 18, fontFamily: 'DMSans-SemiBold', color: '#111827', marginBottom: 4 },
   emptyText: { fontSize: 14, fontFamily: 'DMSans-Regular', color: '#6B7280', textAlign: 'center' },
-  leadCard: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#FFFFFF', borderRadius: 16, padding: 14, marginBottom: 12, borderWidth: 1, borderColor: '#F3F4F6' },
+  leadCard: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 16,
+    padding: 14,
+    marginBottom: 12,
+    borderWidth: 1,
+    borderColor: '#F3F4F6',
+  },
+  leadMainContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
   leadAvatar: { width: 48, height: 48, borderRadius: 14, backgroundColor: '#F3F4F6', justifyContent: 'center', alignItems: 'center' },
   leadAvatarText: { fontSize: 16, fontFamily: 'DMSans-SemiBold', color: '#6B7280' },
   leadContent: { flex: 1, marginLeft: 12 },
@@ -229,4 +273,29 @@ const styles = StyleSheet.create({
   statusBadge: { paddingHorizontal: 8, paddingVertical: 3, borderRadius: 6 },
   statusText: { fontSize: 11, fontFamily: 'DMSans-SemiBold' },
   leadTime: { fontSize: 11, fontFamily: 'DMSans-Regular', color: '#9CA3AF' },
+  leadActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'flex-end',
+    gap: 8,
+    marginTop: 12,
+    paddingTop: 12,
+    borderTopWidth: 1,
+    borderTopColor: '#F3F4F6',
+  },
+  actionBtn: {
+    width: 40,
+    height: 40,
+    borderRadius: 12,
+    backgroundColor: '#F3F4F6',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  actionBtnArrow: {
+    width: 40,
+    height: 40,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginLeft: 4,
+  },
 });
