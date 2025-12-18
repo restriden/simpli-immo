@@ -582,3 +582,66 @@ export async function registerGHLWebhooks(userId: string): Promise<{
     };
   }
 }
+
+/**
+ * Create a new task
+ */
+export async function createGHLTask(
+  userId: string,
+  task: {
+    title: string;
+    description?: string;
+    type?: string;
+    priority?: string;
+    leadId?: string;
+    dueDate?: string;
+  }
+): Promise<{ success: boolean; todo?: any; syncedToGhl: boolean; error?: string }> {
+  try {
+    const { data: { session } } = await supabase.auth.getSession();
+
+    if (!session?.access_token) {
+      return { success: false, syncedToGhl: false, error: 'Not authenticated' };
+    }
+
+    const response = await fetch(`${SUPABASE_FUNCTIONS_URL}/ghl-create-task`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${session.access_token}`,
+      },
+      body: JSON.stringify({
+        user_id: userId,
+        lead_id: task.leadId,
+        title: task.title,
+        description: task.description,
+        type: task.type || 'nachricht',
+        priority: task.priority || 'normal',
+        due_date: task.dueDate,
+      }),
+    });
+
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}));
+      return {
+        success: false,
+        syncedToGhl: false,
+        error: errorData.error || `HTTP ${response.status}`,
+      };
+    }
+
+    const result = await response.json();
+    return {
+      success: result.success,
+      todo: result.todo,
+      syncedToGhl: result.synced_to_ghl || false,
+    };
+  } catch (error) {
+    console.error('[GHL] Create task error:', error);
+    return {
+      success: false,
+      syncedToGhl: false,
+      error: error instanceof Error ? error.message : 'Unknown error',
+    };
+  }
+}

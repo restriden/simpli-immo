@@ -9,6 +9,7 @@ const GHL_API_BASE = "https://services.leadconnectorhq.com";
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") || "";
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || "";
 const ANTHROPIC_API_KEY = Deno.env.get("ANTHROPIC_API_KEY") || "";
+const CRON_SECRET = Deno.env.get("CRON_SECRET") || "simpli-cron-2024";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -45,10 +46,14 @@ serve(async (req: Request) => {
     const body = await req.json().catch(() => ({}));
     const { user_id, sync_type = "full" } = body;
 
-    // Validate authorization
+    // Validate authorization - allow either user token or cron secret
     const authHeader = req.headers.get("Authorization");
-    if (!authHeader) {
-      return jsonResponse({ error: "Missing authorization header" }, 401);
+    const cronSecret = req.headers.get("X-Cron-Secret");
+
+    const isCronRequest = cronSecret === CRON_SECRET;
+
+    if (!authHeader && !isCronRequest) {
+      return jsonResponse({ error: "Missing authorization" }, 401);
     }
 
     // If user_id provided, sync only that user; otherwise sync all active connections

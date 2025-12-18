@@ -7,20 +7,25 @@ import {
   StyleSheet,
   RefreshControl,
   ActivityIndicator,
+  Modal,
+  TextInput,
+  Alert,
+  KeyboardAvoidingView,
+  Platform,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useFocusEffect } from 'expo-router';
 import { Feather } from '@expo/vector-icons';
 import { useAuth } from '../../lib/auth';
 import { getTodos, getDashboardStats, Todo } from '../../lib/database';
-import { completeGHLTask, subscribeToTodos } from '../../lib/ghl';
+import { completeGHLTask, subscribeToTodos, createGHLTask, syncGHLData } from '../../lib/ghl';
 
 const todoIcons: Record<string, { icon: string; color: string }> = {
   nachricht: { icon: 'message-circle', color: '#EF4444' },
-  finanzierung: { icon: 'credit-card', color: '#F97316' },
-  besichtigung: { icon: 'calendar', color: '#3B82F6' },
   anruf: { icon: 'phone', color: '#22C55E' },
-  sonstiges: { icon: 'check-circle', color: '#6B7280' },
+  besichtigung: { icon: 'calendar', color: '#3B82F6' },
+  finanzierung: { icon: 'credit-card', color: '#F97316' },
+  dokument: { icon: 'file-text', color: '#8B5CF6' },
 };
 
 export default function HomeScreen() {
@@ -35,8 +40,48 @@ export default function HomeScreen() {
     activeObjekte: 0,
     monthlyProvision: 0,
   });
+  const [showCreateModal, setShowCreateModal] = useState(false);
+  const [newTaskTitle, setNewTaskTitle] = useState('');
+  const [newTaskDescription, setNewTaskDescription] = useState('');
+  const [newTaskType, setNewTaskType] = useState('nachricht');
+  const [newTaskPriority, setNewTaskPriority] = useState('normal');
+  const [creating, setCreating] = useState(false);
+  const [refreshStatus, setRefreshStatus] = useState('');
 
   const firstName = profile?.full_name?.split(' ')[0] || 'Makler';
+
+  const handleCreateTask = async () => {
+    if (!user?.id || !newTaskTitle.trim()) {
+      Alert.alert('Fehler', 'Bitte gib einen Titel ein');
+      return;
+    }
+
+    setCreating(true);
+    try {
+      const result = await createGHLTask(user.id, {
+        title: newTaskTitle.trim(),
+        description: newTaskDescription.trim() || undefined,
+        type: newTaskType,
+        priority: newTaskPriority,
+      });
+
+      if (result.success) {
+        setShowCreateModal(false);
+        setNewTaskTitle('');
+        setNewTaskDescription('');
+        setNewTaskType('nachricht');
+        setNewTaskPriority('normal');
+        // Reload data to show new task
+        loadData();
+      } else {
+        Alert.alert('Fehler', result.error || 'Konnte Aufgabe nicht erstellen');
+      }
+    } catch (error) {
+      Alert.alert('Fehler', 'Konnte Aufgabe nicht erstellen');
+    } finally {
+      setCreating(false);
+    }
+  };
 
   const loadData = async () => {
     console.log('[DEBUG] loadData called - user:', user, 'user?.id:', user?.id);
@@ -117,9 +162,25 @@ export default function HomeScreen() {
   );
 
   const onRefresh = async () => {
+    if (!user?.id) return;
+
     setRefreshing(true);
-    await loadData();
-    setRefreshing(false);
+    setRefreshStatus('Synchronisiere mit GHL...');
+
+    try {
+      // Sync tasks from GHL (includes translation)
+      setRefreshStatus('Prüfe neue Aufgaben & Übersetzungen...');
+      await syncGHLData(user.id, 'tasks');
+
+      // Reload local data
+      setRefreshStatus('Lade Daten...');
+      await loadData();
+    } catch (error) {
+      console.error('Refresh error:', error);
+    } finally {
+      setRefreshStatus('');
+      setRefreshing(false);
+    }
   };
 
   const toggleTodo = async (todoId: string) => {
@@ -178,10 +239,22 @@ export default function HomeScreen() {
         style={styles.scrollView}
         contentContainerStyle={styles.scrollContent}
         refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={onRefresh}
+            tintColor="#F97316"
+            colors={['#F97316']}
+          />
         }
         showsVerticalScrollIndicator={false}
       >
+        {refreshStatus ? (
+          <View style={styles.syncBanner}>
+            <ActivityIndicator size="small" color="#F97316" />
+            <Text style={styles.syncBannerText}>{refreshStatus}</Text>
+          </View>
+        ) : null}
+
         <View style={styles.statsContainer}>
           <View style={styles.statCard}>
             <View style={[styles.statIcon, { backgroundColor: '#FEF3C7' }]}>
@@ -264,6 +337,119 @@ export default function HomeScreen() {
 
         <View style={{ height: 100 }} />
       </ScrollView>
+
+      {/* FAB Button */}
+      <TouchableOpacity
+        style={styles.fab}
+        onPress={() => setShowCreateModal(true)}
+      >
+        <Feather name="plus" size={24} color="#FFFFFF" />
+      </TouchableOpacity>
+
+      {/* Create Task Modal */}
+      <Modal
+        visible={showCreateModal}
+        animationType="slide"
+        transparent={true}
+        onRequestClose={() => setShowCreateModal(false)}
+      >
+        <KeyboardAvoidingView
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+          style={styles.modalOverlay}
+        >
+          <View style={styles.modalContent}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>Neue Aufgabe</Text>
+              <TouchableOpacity onPress={() => setShowCreateModal(false)}>
+                <Feather name="x" size={24} color="#6B7280" />
+              </TouchableOpacity>
+            </View>
+
+            <TextInput
+              style={styles.input}
+              placeholder="Titel *"
+              value={newTaskTitle}
+              onChangeText={setNewTaskTitle}
+              autoFocus
+            />
+
+            <TextInput
+              style={[styles.input, styles.textArea]}
+              placeholder="Beschreibung (optional)"
+              value={newTaskDescription}
+              onChangeText={setNewTaskDescription}
+              multiline
+              numberOfLines={3}
+            />
+
+            <Text style={styles.inputLabel}>Typ</Text>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.typeSelector}>
+              {Object.entries(todoIcons).map(([type, config]) => (
+                <TouchableOpacity
+                  key={type}
+                  style={[
+                    styles.typeButton,
+                    newTaskType === type && { backgroundColor: config.color },
+                  ]}
+                  onPress={() => setNewTaskType(type)}
+                >
+                  <Feather
+                    name={config.icon as any}
+                    size={16}
+                    color={newTaskType === type ? '#FFFFFF' : config.color}
+                  />
+                  <Text style={[
+                    styles.typeButtonText,
+                    newTaskType === type && { color: '#FFFFFF' },
+                  ]}>
+                    {type.charAt(0).toUpperCase() + type.slice(1)}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+
+            <Text style={styles.inputLabel}>Priorität</Text>
+            <View style={styles.prioritySelector}>
+              <TouchableOpacity
+                style={[
+                  styles.priorityButton,
+                  newTaskPriority === 'normal' && styles.priorityButtonActive,
+                ]}
+                onPress={() => setNewTaskPriority('normal')}
+              >
+                <Text style={[
+                  styles.priorityButtonText,
+                  newTaskPriority === 'normal' && styles.priorityButtonTextActive,
+                ]}>Normal</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[
+                  styles.priorityButton,
+                  newTaskPriority === 'dringend' && styles.priorityButtonUrgent,
+                ]}
+                onPress={() => setNewTaskPriority('dringend')}
+              >
+                <Text style={[
+                  styles.priorityButtonText,
+                  newTaskPriority === 'dringend' && { color: '#FFFFFF' },
+                ]}>Dringend</Text>
+              </TouchableOpacity>
+            </View>
+
+            <TouchableOpacity
+              style={[styles.createButton, creating && styles.createButtonDisabled]}
+              onPress={handleCreateTask}
+              disabled={creating}
+            >
+              {creating ? (
+                <ActivityIndicator color="#FFFFFF" />
+              ) : (
+                <Text style={styles.createButtonText}>Aufgabe erstellen</Text>
+              )}
+            </TouchableOpacity>
+          </View>
+        </KeyboardAvoidingView>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -363,4 +549,144 @@ const styles = StyleSheet.create({
   todoContact: { fontSize: 12, fontFamily: 'DMSans-Medium', color: '#F97316' },
   todoSeparator: { fontSize: 12, color: '#D1D5DB', marginHorizontal: 6 },
   todoObjekt: { fontSize: 12, fontFamily: 'DMSans-Regular', color: '#9CA3AF' },
+  // Sync banner
+  syncBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#FFF7ED',
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    borderRadius: 12,
+    marginBottom: 16,
+    gap: 8,
+  },
+  syncBannerText: {
+    fontSize: 14,
+    fontFamily: 'DMSans-Medium',
+    color: '#F97316',
+  },
+  // FAB styles
+  fab: {
+    position: 'absolute',
+    right: 20,
+    bottom: 30,
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    backgroundColor: '#F97316',
+    justifyContent: 'center',
+    alignItems: 'center',
+    shadowColor: '#F97316',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 8,
+  },
+  // Modal styles
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    justifyContent: 'flex-end',
+  },
+  modalContent: {
+    backgroundColor: '#FFFFFF',
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    padding: 24,
+    maxHeight: '90%',
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 24,
+  },
+  modalTitle: {
+    fontSize: 20,
+    fontFamily: 'DMSans-Bold',
+    color: '#111827',
+  },
+  input: {
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+    borderRadius: 12,
+    padding: 16,
+    fontSize: 16,
+    fontFamily: 'DMSans-Regular',
+    marginBottom: 16,
+    backgroundColor: '#F9FAFB',
+  },
+  textArea: {
+    height: 100,
+    textAlignVertical: 'top',
+  },
+  inputLabel: {
+    fontSize: 14,
+    fontFamily: 'DMSans-SemiBold',
+    color: '#374151',
+    marginBottom: 8,
+  },
+  typeSelector: {
+    marginBottom: 16,
+  },
+  typeButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+    marginRight: 8,
+    gap: 6,
+  },
+  typeButtonText: {
+    fontSize: 13,
+    fontFamily: 'DMSans-Medium',
+    color: '#374151',
+  },
+  prioritySelector: {
+    flexDirection: 'row',
+    gap: 12,
+    marginBottom: 24,
+  },
+  priorityButton: {
+    flex: 1,
+    paddingVertical: 12,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+    alignItems: 'center',
+  },
+  priorityButtonActive: {
+    backgroundColor: '#F3F4F6',
+    borderColor: '#F97316',
+  },
+  priorityButtonUrgent: {
+    backgroundColor: '#EF4444',
+    borderColor: '#EF4444',
+  },
+  priorityButtonText: {
+    fontSize: 14,
+    fontFamily: 'DMSans-Medium',
+    color: '#374151',
+  },
+  priorityButtonTextActive: {
+    color: '#F97316',
+  },
+  createButton: {
+    backgroundColor: '#F97316',
+    borderRadius: 12,
+    paddingVertical: 16,
+    alignItems: 'center',
+  },
+  createButtonDisabled: {
+    opacity: 0.7,
+  },
+  createButtonText: {
+    fontSize: 16,
+    fontFamily: 'DMSans-SemiBold',
+    color: '#FFFFFF',
+  },
 });
