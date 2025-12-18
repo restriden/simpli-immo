@@ -24,6 +24,15 @@ serve(async (req: Request) => {
     return new Response("ok", { headers: corsHeaders });
   }
 
+  // Handle GET requests (GHL webhook validation)
+  if (req.method === "GET") {
+    console.log("Webhook validation request received");
+    return new Response(JSON.stringify({ success: true, message: "Webhook endpoint active" }), {
+      status: 200,
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
+    });
+  }
+
   try {
     const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
 
