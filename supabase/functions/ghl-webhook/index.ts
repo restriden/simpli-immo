@@ -24,10 +24,10 @@ serve(async (req: Request) => {
     return new Response("ok", { headers: corsHeaders });
   }
 
-  // Handle GET requests (GHL webhook validation)
-  if (req.method === "GET") {
-    console.log("Webhook validation request received");
-    return new Response(JSON.stringify({ success: true, message: "Webhook endpoint active" }), {
+  // Handle GET/HEAD requests (GHL webhook validation)
+  if (req.method === "GET" || req.method === "HEAD") {
+    console.log("Webhook validation request received:", req.method);
+    return new Response(req.method === "HEAD" ? null : JSON.stringify({ success: true }), {
       status: 200,
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
@@ -45,9 +45,10 @@ serve(async (req: Request) => {
 
     const { type, locationId } = payload;
 
+    // Handle test/validation webhooks from GHL (no locationId)
     if (!locationId) {
-      console.error("No locationId in webhook payload");
-      return jsonResponse({ error: "Missing locationId" }, 400);
+      console.log("No locationId - likely a test/validation webhook");
+      return jsonResponse({ success: true, message: "Webhook received" }, 200);
     }
 
     // Find the connection for this location
@@ -104,11 +105,35 @@ serve(async (req: Request) => {
 
 async function handleMessage(supabase: any, connection: any, payload: any) {
   console.log("=== HANDLING MESSAGE ===");
+  console.log("Full payload:", JSON.stringify(payload, null, 2));
 
-  const { contactId, conversationId, message, direction, messageType } = payload;
+  // GHL webhook payload can have different structures
+  // Try to extract contactId from various possible locations
+  const contactId = payload.contactId || payload.contact_id || payload.contact?.id;
+  const conversationId = payload.conversationId || payload.conversation_id;
 
-  if (!contactId || !message) {
-    console.error("Missing contactId or message in payload");
+  // Message content can be in different places
+  const messageBody = payload.body || payload.message?.body || payload.message?.text ||
+                      payload.text || payload.messageBody || payload.content || "";
+
+  // Message ID
+  const messageId = payload.messageId || payload.message_id || payload.id ||
+                    payload.message?.id || `webhook_${Date.now()}`;
+
+  // Direction - GHL uses "inbound"/"outbound" or type contains it
+  const isInbound = payload.direction === "inbound" ||
+                    payload.type === "InboundMessage" ||
+                    payload.direction === "incoming";
+
+  console.log("Extracted - contactId:", contactId, "messageBody:", messageBody?.substring(0, 50));
+
+  if (!contactId) {
+    console.error("Missing contactId in payload. Available keys:", Object.keys(payload));
+    return;
+  }
+
+  if (!messageBody) {
+    console.error("Missing message body in payload");
     return;
   }
 
@@ -121,22 +146,24 @@ async function handleMessage(supabase: any, connection: any, payload: any) {
     .single();
 
   if (leadError || !lead) {
-    console.log("Lead not found for contact:", contactId);
+    console.log("Lead not found for contact:", contactId, "Error:", leadError?.message);
     // Optionally create the lead here
     return;
   }
+
+  console.log("Found lead:", lead.id);
 
   // Create message record
   const messageData = {
     user_id: connection.user_id,
     lead_id: lead.id,
-    ghl_message_id: message.id || `webhook_${Date.now()}`,
+    ghl_message_id: messageId,
     ghl_conversation_id: conversationId,
-    content: message.body || message.text || "",
-    type: direction === "inbound" ? "incoming" : "outgoing",
+    content: messageBody,
+    type: isInbound ? "incoming" : "outgoing",
     is_template: false,
     ghl_data: payload,
-    created_at: message.dateAdded || new Date().toISOString(),
+    created_at: payload.dateAdded || payload.createdAt || payload.timestamp || new Date().toISOString(),
   };
 
   console.log("Inserting message:", messageData.ghl_message_id);

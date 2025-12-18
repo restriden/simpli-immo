@@ -57,11 +57,28 @@ export default function ChatScreen() {
     const unsubscribe = subscribeToMessages(leadId, (newMsg) => {
       console.log('[CHAT] Received real-time message:', newMsg);
       setMessages(prev => {
-        // Avoid duplicates
-        if (prev.some(m => m.id === newMsg.id || m.ghl_message_id === newMsg.ghl_message_id)) {
+        // Check for duplicates by id or ghl_message_id
+        const isDuplicate = prev.some(m =>
+          m.id === newMsg.id ||
+          (newMsg.ghl_message_id && m.ghl_message_id === newMsg.ghl_message_id) ||
+          (newMsg.ghl_message_id && m.id === newMsg.ghl_message_id)
+        );
+
+        if (isDuplicate) {
+          console.log('[CHAT] Duplicate message, skipping');
           return prev;
         }
-        return [...prev, newMsg];
+
+        // Remove any temp messages with same content (optimistic updates)
+        const filtered = prev.filter(m => {
+          if (typeof m.id === 'string' && m.id.startsWith('temp_')) {
+            // Remove temp message if content matches
+            return m.content !== newMsg.content;
+          }
+          return true;
+        });
+
+        return [...filtered, newMsg];
       });
       setTimeout(() => {
         scrollViewRef.current?.scrollToEnd({ animated: true });
@@ -118,14 +135,15 @@ export default function ChatScreen() {
         }
 
         // Message will appear via real-time subscription
-        // But also add it immediately for better UX
+        // Add optimistic message with temp_ prefix for immediate UX
         const optimisticMessage: Message = {
-          id: result.messageId || `temp_${Date.now()}`,
+          id: `temp_${Date.now()}`,
           lead_id: leadId,
           user_id: user.id,
           content: messageContent,
           type: 'outgoing',
           is_template: false,
+          ghl_message_id: result.messageId,
           created_at: new Date().toISOString(),
         };
         setMessages(prev => [...prev, optimisticMessage]);
