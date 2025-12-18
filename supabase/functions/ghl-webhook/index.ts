@@ -204,6 +204,33 @@ async function handleMessage(supabase: any, connection: any, payload: any) {
       updated_at: new Date().toISOString(),
     })
     .eq("id", lead.id);
+
+  // Analyze incoming messages with AI (async, don't block webhook response)
+  if (isInbound) {
+    try {
+      const analyzeUrl = `${Deno.env.get("SUPABASE_URL")}/functions/v1/analyze-message`;
+      const analyzeResponse = await fetch(analyzeUrl, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")}`,
+        },
+        body: JSON.stringify({
+          message_content: messageBody,
+          lead_id: lead.id,
+        }),
+      });
+
+      if (analyzeResponse.ok) {
+        const analysisResult = await analyzeResponse.json();
+        console.log("Message analysis result:", analysisResult);
+      } else {
+        console.error("Message analysis failed:", await analyzeResponse.text());
+      }
+    } catch (analyzeError) {
+      console.error("Error calling analyze-message:", analyzeError);
+    }
+  }
 }
 
 async function handleContact(supabase: any, connection: any, payload: any) {

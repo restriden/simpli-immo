@@ -18,6 +18,14 @@ import { useAuth } from '../../lib/auth';
 import { getLead, getMessages, sendMessage, Lead, Message } from '../../lib/database';
 import { sendGHLMessage, subscribeToMessages, checkGHLConnection } from '../../lib/ghl';
 
+interface PendingQuestion {
+  id: string;
+  content: string;
+  topic_summary: string;
+  urgency: 'hoch' | 'mittel' | 'niedrig';
+  created_at: string;
+}
+
 const statusLabels: Record<string, { label: string; color: string; bg: string }> = {
   neu: { label: 'Neu', color: '#3B82F6', bg: '#DBEAFE' },
   kontaktiert: { label: 'Kontaktiert', color: '#6B7280', bg: '#F3F4F6' },
@@ -42,6 +50,8 @@ export default function ChatScreen() {
   const [sending, setSending] = useState(false);
   const [ghlConnected, setGhlConnected] = useState(false);
   const [messageType, setMessageType] = useState<'WhatsApp' | 'SMS' | 'Email'>('WhatsApp');
+  const [pendingQuestions, setPendingQuestions] = useState<PendingQuestion[]>([]);
+  const messageRefs = useRef<{ [key: string]: number }>({});
 
   // Load data and check GHL connection
   useEffect(() => {
@@ -95,6 +105,44 @@ export default function ChatScreen() {
     if (!user?.id) return;
     const connection = await checkGHLConnection(user.id);
     setGhlConnected(!!connection);
+  };
+
+  // Detect unanswered questions from messages
+  useEffect(() => {
+    const detectPendingQuestions = () => {
+      const pending: PendingQuestion[] = [];
+
+      for (let i = 0; i < messages.length; i++) {
+        const msg = messages[i] as any;
+
+        // Check if this is an incoming message with analysis data
+        if (msg.type === 'incoming' && msg.ghl_data?.analysis?.is_question) {
+          // Check if there's an outgoing message after this one
+          const hasResponse = messages.slice(i + 1).some(m => m.type === 'outgoing');
+
+          if (!hasResponse) {
+            pending.push({
+              id: msg.id,
+              content: msg.content,
+              topic_summary: msg.ghl_data.analysis.topic_summary || 'Frage',
+              urgency: msg.ghl_data.analysis.urgency || 'mittel',
+              created_at: msg.created_at,
+            });
+          }
+        }
+      }
+
+      setPendingQuestions(pending);
+    };
+
+    detectPendingQuestions();
+  }, [messages]);
+
+  const scrollToMessage = (messageId: string) => {
+    const yPosition = messageRefs.current[messageId];
+    if (yPosition !== undefined && scrollViewRef.current) {
+      scrollViewRef.current.scrollTo({ y: yPosition - 100, animated: true });
+    }
   };
 
   const loadData = async () => {
@@ -270,6 +318,33 @@ export default function ChatScreen() {
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
         keyboardVerticalOffset={0}
       >
+        {/* Pending Questions Banner */}
+        {pendingQuestions.length > 0 && (
+          <View style={styles.pendingBanner}>
+            <View style={styles.pendingHeader}>
+              <Feather name="alert-circle" size={16} color="#DC2626" />
+              <Text style={styles.pendingTitle}>
+                {pendingQuestions.length} offene Frage{pendingQuestions.length > 1 ? 'n' : ''}
+              </Text>
+            </View>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.pendingScroll}>
+              {pendingQuestions.map((q, idx) => (
+                <TouchableOpacity
+                  key={q.id}
+                  style={[
+                    styles.pendingCard,
+                    q.urgency === 'hoch' && styles.pendingCardUrgent,
+                  ]}
+                  onPress={() => scrollToMessage(q.id)}
+                >
+                  <Text style={styles.pendingTopic} numberOfLines={1}>{q.topic_summary}</Text>
+                  <Text style={styles.pendingPreview} numberOfLines={1}>{q.content}</Text>
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+          </View>
+        )}
+
         {/* Messages */}
         <ScrollView
           ref={scrollViewRef}
@@ -291,8 +366,16 @@ export default function ChatScreen() {
               const showDate = index === 0 ||
                 formatDate(message.created_at) !== formatDate(messages[index - 1].created_at);
 
+              const isQuestion = (message as any).ghl_data?.analysis?.is_question;
+              const isPending = pendingQuestions.some(q => q.id === message.id);
+
               return (
-                <View key={message.id}>
+                <View
+                  key={message.id}
+                  onLayout={(event) => {
+                    messageRefs.current[message.id] = event.nativeEvent.layout.y;
+                  }}
+                >
                   {showDate && (
                     <View style={styles.dateSeparator}>
                       <Text style={styles.dateText}>{formatDate(message.created_at)}</Text>
@@ -306,8 +389,15 @@ export default function ChatScreen() {
                   ) : (
                     <View style={[
                       styles.messageBubble,
-                      message.type === 'outgoing' ? styles.outgoingBubble : styles.incomingBubble
+                      message.type === 'outgoing' ? styles.outgoingBubble : styles.incomingBubble,
+                      isPending && styles.pendingQuestionBubble,
                     ]}>
+                      {isPending && (
+                        <View style={styles.questionIndicator}>
+                          <Feather name="help-circle" size={12} color="#DC2626" />
+                          <Text style={styles.questionIndicatorText}>Wartet auf Antwort</Text>
+                        </View>
+                      )}
                       <Text style={[
                         styles.messageText,
                         message.type === 'outgoing' ? styles.outgoingText : styles.incomingText
@@ -432,4 +522,69 @@ const styles = StyleSheet.create({
   textInput: { flex: 1, fontSize: 15, fontFamily: 'DMSans-Regular', color: '#111827', maxHeight: 100, paddingVertical: 8 },
   sendButton: { width: 40, height: 40, borderRadius: 20, backgroundColor: '#F97316', justifyContent: 'center', alignItems: 'center' },
   sendButtonDisabled: { backgroundColor: '#D1D5DB' },
+  // Pending Questions
+  pendingBanner: {
+    backgroundColor: '#FEF2F2',
+    borderBottomWidth: 1,
+    borderBottomColor: '#FECACA',
+    paddingVertical: 10,
+  },
+  pendingHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 16,
+    marginBottom: 8,
+  },
+  pendingTitle: {
+    fontSize: 13,
+    fontFamily: 'DMSans-SemiBold',
+    color: '#DC2626',
+  },
+  pendingScroll: {
+    paddingHorizontal: 12,
+  },
+  pendingCard: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 10,
+    padding: 10,
+    marginHorizontal: 4,
+    minWidth: 140,
+    maxWidth: 200,
+    borderWidth: 1,
+    borderColor: '#FECACA',
+  },
+  pendingCardUrgent: {
+    borderColor: '#DC2626',
+    borderWidth: 2,
+  },
+  pendingTopic: {
+    fontSize: 12,
+    fontFamily: 'DMSans-SemiBold',
+    color: '#DC2626',
+    marginBottom: 2,
+  },
+  pendingPreview: {
+    fontSize: 11,
+    fontFamily: 'DMSans-Regular',
+    color: '#6B7280',
+  },
+  pendingQuestionBubble: {
+    borderColor: '#FECACA',
+    borderWidth: 2,
+  },
+  questionIndicator: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    marginBottom: 6,
+    paddingBottom: 6,
+    borderBottomWidth: 1,
+    borderBottomColor: '#FEE2E2',
+  },
+  questionIndicatorText: {
+    fontSize: 10,
+    fontFamily: 'DMSans-Medium',
+    color: '#DC2626',
+  },
 });
