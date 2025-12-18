@@ -8,6 +8,7 @@ const REDIRECT_URI = "https://hsfrdovpgxtqbitmkrhs.supabase.co/functions/v1/oaut
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") || "";
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || "";
+const GHL_WEBHOOK_URL = "https://hsfrdovpgxtqbitmkrhs.supabase.co/functions/v1/ghl-webhook";
 
 // App deep link for redirect after OAuth
 const APP_SUCCESS_REDIRECT = "simpliimmo://oauth/success";
@@ -226,7 +227,15 @@ serve(async (req: Request) => {
 
     console.log("Connection saved successfully:", connection.id);
 
-    // Step 7: Log the successful connection
+    // Step 7: Register webhooks automatically for this location
+    console.log("Registering webhooks for location...");
+    const webhookResult = await registerWebhooks(
+      tokenResponse.access_token,
+      tokenResponse.locationId
+    );
+    console.log("Webhook registration result:", webhookResult);
+
+    // Step 8: Log the successful connection
     await supabase.from("ghl_sync_logs").insert({
       connection_id: connection.id,
       sync_type: "oauth",
@@ -235,10 +244,12 @@ serve(async (req: Request) => {
       metadata: {
         location_id: tokenResponse.locationId,
         scopes: tokenResponse.scope,
+        webhooks_registered: webhookResult.success,
+        webhook_ids: webhookResult.webhookIds,
       },
     });
 
-    // Step 8: Redirect to success
+    // Step 9: Redirect to success
     return redirectToApp(true, "Verbindung erfolgreich hergestellt!");
   } catch (err) {
     console.error("OAuth callback error:", err);
@@ -318,4 +329,117 @@ function redirectToApp(success: boolean, message: string): Response {
       "Location": appRedirect,
     },
   });
+}
+
+/**
+ * Register webhooks for a GHL location
+ * This automatically subscribes to message and contact events
+ */
+async function registerWebhooks(
+  accessToken: string,
+  locationId: string
+): Promise<{ success: boolean; webhookIds: string[]; errors: string[] }> {
+  const webhookIds: string[] = [];
+  const errors: string[] = [];
+
+  // Events we want to subscribe to
+  const webhookConfigs = [
+    {
+      name: "Simpli.Immo - Inbound Messages",
+      events: ["InboundMessage"],
+    },
+    {
+      name: "Simpli.Immo - Outbound Messages",
+      events: ["OutboundMessage"],
+    },
+    {
+      name: "Simpli.Immo - Contacts",
+      events: ["ContactCreate", "ContactUpdate"],
+    },
+  ];
+
+  // First, check for existing webhooks to avoid duplicates
+  try {
+    console.log("Checking for existing webhooks...");
+    const existingResponse = await fetch(
+      `https://services.leadconnectorhq.com/webhooks/?locationId=${locationId}`,
+      {
+        method: "GET",
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          Version: "2021-07-28",
+          Accept: "application/json",
+        },
+      }
+    );
+
+    if (existingResponse.ok) {
+      const existingData = await existingResponse.json();
+      const existingWebhooks = existingData.webhooks || [];
+
+      // Check if our webhooks already exist
+      const ourWebhookUrls = existingWebhooks.filter(
+        (w: any) => w.url === GHL_WEBHOOK_URL
+      );
+
+      if (ourWebhookUrls.length > 0) {
+        console.log("Webhooks already registered:", ourWebhookUrls.length);
+        return {
+          success: true,
+          webhookIds: ourWebhookUrls.map((w: any) => w.id),
+          errors: [],
+        };
+      }
+    }
+  } catch (err) {
+    console.error("Error checking existing webhooks:", err);
+    // Continue to try registering anyway
+  }
+
+  // Register each webhook config
+  for (const config of webhookConfigs) {
+    try {
+      console.log(`Registering webhook: ${config.name}`);
+
+      const response = await fetch(
+        "https://services.leadconnectorhq.com/webhooks/",
+        {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${accessToken}`,
+            Version: "2021-07-28",
+            "Content-Type": "application/json",
+            Accept: "application/json",
+          },
+          body: JSON.stringify({
+            name: config.name,
+            url: GHL_WEBHOOK_URL,
+            events: config.events,
+            locationId: locationId,
+          }),
+        }
+      );
+
+      if (response.ok) {
+        const data = await response.json();
+        console.log(`Webhook registered: ${config.name}`, data);
+        if (data.webhook?.id) {
+          webhookIds.push(data.webhook.id);
+        }
+      } else {
+        const errorText = await response.text();
+        console.error(`Failed to register webhook ${config.name}:`, response.status, errorText);
+        errors.push(`${config.name}: ${response.status}`);
+      }
+    } catch (err) {
+      console.error(`Error registering webhook ${config.name}:`, err);
+      errors.push(`${config.name}: ${err.message}`);
+    }
+  }
+
+  return {
+    success: webhookIds.length > 0,
+    webhookIds,
+    errors,
+  };
 }
