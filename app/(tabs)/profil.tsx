@@ -1,13 +1,147 @@
-import React from 'react';
-import { View, Text, ScrollView, TouchableOpacity, StyleSheet, Alert } from 'react-native';
+import React, { useState, useEffect, useCallback } from 'react';
+import { View, Text, ScrollView, TouchableOpacity, StyleSheet, Alert, ActivityIndicator } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useRouter } from 'expo-router';
+import { useRouter, useFocusEffect } from 'expo-router';
 import { Feather } from '@expo/vector-icons';
 import { useAuth } from '../../lib/auth';
+import {
+  startGHLOAuth,
+  checkGHLConnection,
+  disconnectGHL,
+  syncGHLData,
+  formatLastSync,
+  debugGHLConnections,
+  GHLConnection
+} from '../../lib/ghl';
 
 export default function ProfilScreen() {
   const router = useRouter();
-  const { profile, signOut } = useAuth();
+  const { user, profile, signOut } = useAuth();
+
+  // GHL Connection State
+  const [ghlConnection, setGhlConnection] = useState<GHLConnection | null>(null);
+  const [ghlLoading, setGhlLoading] = useState(true);
+  const [ghlConnecting, setGhlConnecting] = useState(false);
+  const [ghlSyncing, setGhlSyncing] = useState(false);
+
+  // Load GHL connection status
+  const loadGHLStatus = async () => {
+    console.log('[PROFIL] loadGHLStatus called, user?.id:', user?.id);
+
+    if (!user?.id) {
+      console.log('[PROFIL] No user.id, setting ghlLoading to false');
+      setGhlLoading(false);
+      return;
+    }
+
+    try {
+      console.log('[PROFIL] User ID for GHL check:', user.id);
+
+      // Run debug check first to see all data
+      const debugInfo = await debugGHLConnections(user.id);
+      console.log('[PROFIL] Debug info - all connections:', debugInfo.allConnections.length);
+      console.log('[PROFIL] Debug info - active connection:', debugInfo.activeConnection);
+      console.log('[PROFIL] Debug info - error:', debugInfo.error);
+
+      console.log('[PROFIL] Checking GHL connection...');
+      const connection = await checkGHLConnection(user.id);
+      console.log('[PROFIL] GHL connection result:', connection);
+      setGhlConnection(connection);
+    } catch (error) {
+      console.error('[PROFIL] Error loading GHL status:', error);
+    } finally {
+      console.log('[PROFIL] Setting ghlLoading to false');
+      setGhlLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    loadGHLStatus();
+  }, [user?.id]);
+
+  // Reload on focus (after OAuth redirect)
+  useFocusEffect(
+    useCallback(() => {
+      loadGHLStatus();
+    }, [user?.id])
+  );
+
+  // Handle GHL Connect
+  const handleGHLConnect = async () => {
+    if (!user?.id) {
+      Alert.alert('Fehler', 'Du musst eingeloggt sein um GHL zu verbinden.');
+      return;
+    }
+
+    setGhlConnecting(true);
+    try {
+      const result = await startGHLOAuth(user.id);
+
+      if (result.success) {
+        Alert.alert('Erfolg', 'GoHighLevel wurde erfolgreich verbunden!');
+        await loadGHLStatus();
+      } else {
+        Alert.alert('Fehler', result.error || 'Verbindung fehlgeschlagen');
+      }
+    } catch (error) {
+      console.error('GHL connect error:', error);
+      Alert.alert('Fehler', 'Ein unbekannter Fehler ist aufgetreten');
+    } finally {
+      setGhlConnecting(false);
+    }
+  };
+
+  // Handle GHL Disconnect
+  const handleGHLDisconnect = () => {
+    Alert.alert(
+      'GHL trennen',
+      'Möchtest du die Verbindung zu GoHighLevel wirklich trennen? Deine synchronisierten Daten bleiben erhalten.',
+      [
+        { text: 'Abbrechen', style: 'cancel' },
+        {
+          text: 'Trennen',
+          style: 'destructive',
+          onPress: async () => {
+            if (!user?.id) return;
+
+            const success = await disconnectGHL(user.id);
+            if (success) {
+              setGhlConnection(null);
+              Alert.alert('Erfolg', 'GoHighLevel wurde getrennt.');
+            } else {
+              Alert.alert('Fehler', 'Trennen fehlgeschlagen');
+            }
+          },
+        },
+      ]
+    );
+  };
+
+  // Handle GHL Sync
+  const handleGHLSync = async () => {
+    if (!user?.id) return;
+
+    setGhlSyncing(true);
+    try {
+      const result = await syncGHLData(user.id, 'full');
+
+      if (result.success) {
+        const userResult = result.results[user.id];
+        Alert.alert(
+          'Sync abgeschlossen',
+          `Kontakte: ${userResult?.contacts?.synced || 0}\nNachrichten: ${userResult?.conversations?.synced || 0}\nTermine: ${userResult?.appointments?.synced || 0}`
+        );
+        await loadGHLStatus();
+      } else {
+        Alert.alert('Fehler', 'Sync fehlgeschlagen');
+      }
+    } catch (error) {
+      console.error('GHL sync error:', error);
+      Alert.alert('Fehler', 'Sync fehlgeschlagen');
+    } finally {
+      setGhlSyncing(false);
+    }
+  };
 
   const handleSignOut = () => {
     Alert.alert('Abmelden', 'Möchtest du dich wirklich abmelden?', [
@@ -57,6 +191,93 @@ export default function ProfilScreen() {
           </View>
         </View>
 
+        {/* GoHighLevel Integration Section */}
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>Integrationen</Text>
+
+          {ghlLoading ? (
+            <View style={styles.ghlCard}>
+              <ActivityIndicator size="small" color="#F97316" />
+            </View>
+          ) : ghlConnection ? (
+            // Connected State
+            <View style={styles.ghlCard}>
+              <View style={styles.ghlHeader}>
+                <View style={styles.ghlIconConnected}>
+                  <Feather name="link" size={20} color="#22C55E" />
+                </View>
+                <View style={styles.ghlInfo}>
+                  <View style={styles.ghlTitleRow}>
+                    <Text style={styles.ghlTitle}>GoHighLevel</Text>
+                    <View style={styles.ghlBadgeConnected}>
+                      <Feather name="check-circle" size={12} color="#22C55E" />
+                      <Text style={styles.ghlBadgeText}>Verbunden</Text>
+                    </View>
+                  </View>
+                  <Text style={styles.ghlLocation}>
+                    {ghlConnection.location_name || ghlConnection.location_id}
+                  </Text>
+                  <Text style={styles.ghlLastSync}>
+                    {formatLastSync(ghlConnection.last_sync_at)}
+                  </Text>
+                </View>
+              </View>
+
+              <View style={styles.ghlActions}>
+                <TouchableOpacity
+                  style={styles.ghlSyncButton}
+                  onPress={handleGHLSync}
+                  disabled={ghlSyncing}
+                >
+                  {ghlSyncing ? (
+                    <ActivityIndicator size="small" color="#FFFFFF" />
+                  ) : (
+                    <>
+                      <Feather name="refresh-cw" size={16} color="#FFFFFF" />
+                      <Text style={styles.ghlSyncButtonText}>Sync</Text>
+                    </>
+                  )}
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={styles.ghlDisconnectButton}
+                  onPress={handleGHLDisconnect}
+                >
+                  <Feather name="x" size={16} color="#EF4444" />
+                  <Text style={styles.ghlDisconnectButtonText}>Trennen</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          ) : (
+            // Not Connected State
+            <TouchableOpacity
+              style={styles.ghlConnectCard}
+              onPress={handleGHLConnect}
+              disabled={ghlConnecting}
+            >
+              <View style={styles.ghlConnectContent}>
+                <View style={styles.ghlIconDisconnected}>
+                  <Feather name="link-2" size={24} color="#6B7280" />
+                </View>
+                <View style={styles.ghlConnectInfo}>
+                  <Text style={styles.ghlConnectTitle}>GoHighLevel verbinden</Text>
+                  <Text style={styles.ghlConnectSubtitle}>
+                    Synchronisiere Leads, Nachrichten und Termine
+                  </Text>
+                </View>
+              </View>
+              {ghlConnecting ? (
+                <ActivityIndicator size="small" color="#F97316" />
+              ) : (
+                <View style={styles.ghlConnectButton}>
+                  <Text style={styles.ghlConnectButtonText}>Verbinden</Text>
+                  <Feather name="arrow-right" size={16} color="#FFFFFF" />
+                </View>
+              )}
+            </TouchableOpacity>
+          )}
+        </View>
+
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>KI-Assistent</Text>
           <TouchableOpacity style={styles.kiCard}>
@@ -99,7 +320,21 @@ export default function ProfilScreen() {
           <Text style={styles.signOutText}>Abmelden</Text>
         </TouchableOpacity>
 
-        <Text style={styles.version}>Version 1.0.0</Text>
+        <TouchableOpacity
+          onLongPress={async () => {
+            if (user?.id) {
+              const debugInfo = await debugGHLConnections(user.id);
+              Alert.alert(
+                'Debug Info',
+                `User ID: ${user.id}\n\nGHL Connections: ${debugInfo.allConnections.length}\n\nActive: ${debugInfo.activeConnection ? 'Yes' : 'No'}\n\nError: ${debugInfo.error || 'None'}`
+              );
+            } else {
+              Alert.alert('Debug Info', 'No user logged in');
+            }
+          }}
+        >
+          <Text style={styles.version}>Version 1.0.0</Text>
+        </TouchableOpacity>
         <View style={{ height: 100 }} />
       </ScrollView>
     </SafeAreaView>
@@ -142,4 +377,30 @@ const styles = StyleSheet.create({
   signOutButton: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, paddingVertical: 16, marginTop: 8 },
   signOutText: { fontSize: 15, fontFamily: 'DMSans-SemiBold', color: '#EF4444' },
   version: { fontSize: 12, fontFamily: 'DMSans-Regular', color: '#9CA3AF', textAlign: 'center', marginTop: 8 },
+
+  // GHL Styles
+  ghlCard: { backgroundColor: '#FFFFFF', borderRadius: 16, padding: 16, borderWidth: 1, borderColor: '#D1FAE5' },
+  ghlHeader: { flexDirection: 'row', alignItems: 'flex-start' },
+  ghlIconConnected: { width: 44, height: 44, borderRadius: 12, backgroundColor: '#D1FAE5', justifyContent: 'center', alignItems: 'center' },
+  ghlInfo: { flex: 1, marginLeft: 12 },
+  ghlTitleRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  ghlTitle: { fontSize: 16, fontFamily: 'DMSans-SemiBold', color: '#111827' },
+  ghlBadgeConnected: { flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: '#D1FAE5', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 6 },
+  ghlBadgeText: { fontSize: 11, fontFamily: 'DMSans-SemiBold', color: '#22C55E' },
+  ghlLocation: { fontSize: 14, fontFamily: 'DMSans-Medium', color: '#6B7280', marginTop: 4 },
+  ghlLastSync: { fontSize: 12, fontFamily: 'DMSans-Regular', color: '#9CA3AF', marginTop: 2 },
+  ghlActions: { flexDirection: 'row', gap: 10, marginTop: 14, paddingTop: 14, borderTopWidth: 1, borderTopColor: '#F3F4F6' },
+  ghlSyncButton: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, backgroundColor: '#F97316', paddingVertical: 10, borderRadius: 10 },
+  ghlSyncButtonText: { fontSize: 14, fontFamily: 'DMSans-SemiBold', color: '#FFFFFF' },
+  ghlDisconnectButton: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, backgroundColor: '#FEE2E2', paddingVertical: 10, paddingHorizontal: 16, borderRadius: 10 },
+  ghlDisconnectButtonText: { fontSize: 14, fontFamily: 'DMSans-SemiBold', color: '#EF4444' },
+
+  ghlConnectCard: { backgroundColor: '#FFFFFF', borderRadius: 16, padding: 16, borderWidth: 1, borderColor: '#F3F4F6' },
+  ghlConnectContent: { flexDirection: 'row', alignItems: 'center', marginBottom: 14 },
+  ghlIconDisconnected: { width: 48, height: 48, borderRadius: 12, backgroundColor: '#F3F4F6', justifyContent: 'center', alignItems: 'center' },
+  ghlConnectInfo: { flex: 1, marginLeft: 12 },
+  ghlConnectTitle: { fontSize: 16, fontFamily: 'DMSans-SemiBold', color: '#111827' },
+  ghlConnectSubtitle: { fontSize: 13, fontFamily: 'DMSans-Regular', color: '#6B7280', marginTop: 2 },
+  ghlConnectButton: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, backgroundColor: '#F97316', paddingVertical: 12, borderRadius: 10 },
+  ghlConnectButtonText: { fontSize: 15, fontFamily: 'DMSans-SemiBold', color: '#FFFFFF' },
 });

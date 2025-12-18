@@ -4,7 +4,7 @@
     "slug": "simpli-immo",
     "version": "1.0.0",
     "orientation": "portrait",
-    "scheme": "simpli-immo",
+    "scheme": "simpliimmo",
     "userInterfaceStyle": "light",
     "assetBundlePatterns": ["**/*"],
     "ios": {

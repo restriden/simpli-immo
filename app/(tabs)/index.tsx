@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   View,
   Text,
@@ -6,93 +6,106 @@ import {
   TouchableOpacity,
   StyleSheet,
   RefreshControl,
+  ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useRouter } from 'expo-router';
+import { useRouter, useFocusEffect } from 'expo-router';
 import { Feather } from '@expo/vector-icons';
 import { useAuth } from '../../lib/auth';
+import { getTodos, completeTodo, getDashboardStats, Todo } from '../../lib/database';
 
-const mockTodos = [
-  {
-    id: '1',
-    leadId: '1',
-    type: 'nachricht',
-    priority: 'dringend',
-    title: 'Neue Nachricht beantworten',
-    subtitle: 'Frage zur Wohnfläche',
-    kontaktName: 'Max Mustermann',
-    objektName: 'Musterstraße 5',
-    icon: 'message-circle',
-    color: '#EF4444',
-  },
-  {
-    id: '2',
-    leadId: '2',
-    type: 'finanzierung',
-    priority: 'dringend',
-    title: 'Finanzierungsanfrage prüfen',
-    subtitle: 'Simpli Finance Rückmeldung',
-    kontaktName: 'Anna Schmidt',
-    objektName: 'Musterstraße 5',
-    icon: 'credit-card',
-    color: '#F97316',
-  },
-  {
-    id: '3',
-    leadId: '3',
-    type: 'besichtigung',
-    priority: 'normal',
-    title: 'Besichtigung bestätigen',
-    subtitle: 'Morgen, 14:00 Uhr',
-    kontaktName: 'Peter Meier',
-    objektName: 'Beispielweg 10',
-    icon: 'calendar',
-    color: '#3B82F6',
-  },
-  {
-    id: '4',
-    leadId: '4',
-    type: 'anruf',
-    priority: 'normal',
-    title: 'Rückruf vereinbaren',
-    subtitle: 'Interessent wartet auf Antwort',
-    kontaktName: 'Lisa Weber',
-    objektName: 'Beispielweg 10',
-    icon: 'phone',
-    color: '#22C55E',
-  },
-];
-
-const mockStats = {
-  openTodos: 4,
-  activeObjekte: 2,
-  monthlyProvision: 2450,
+const todoIcons: Record<string, { icon: string; color: string }> = {
+  nachricht: { icon: 'message-circle', color: '#EF4444' },
+  finanzierung: { icon: 'credit-card', color: '#F97316' },
+  besichtigung: { icon: 'calendar', color: '#3B82F6' },
+  anruf: { icon: 'phone', color: '#22C55E' },
+  sonstiges: { icon: 'check-circle', color: '#6B7280' },
 };
 
 export default function HomeScreen() {
-  const { profile } = useAuth();
+  const { user, profile } = useAuth();
   const router = useRouter();
   const [refreshing, setRefreshing] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [todos, setTodos] = useState<Todo[]>([]);
   const [completedTodos, setCompletedTodos] = useState<string[]>([]);
+  const [stats, setStats] = useState({
+    openTodos: 0,
+    activeObjekte: 0,
+    monthlyProvision: 0,
+  });
 
   const firstName = profile?.full_name?.split(' ')[0] || 'Makler';
 
+  const loadData = async () => {
+    console.log('[DEBUG] loadData called - user:', user, 'user?.id:', user?.id);
+
+    if (!user?.id) {
+      console.log('[DEBUG] loadData: No user.id, returning early');
+      setLoading(false);  // FIX: Set loading to false even when no user
+      return;
+    }
+
+    console.log('[DEBUG] loadData: Fetching data for user.id:', user.id);
+
+    try {
+      const [todosData, statsData] = await Promise.all([
+        getTodos(user.id),
+        getDashboardStats(user.id),
+      ]);
+
+      console.log('[DEBUG] loadData: Received todosData:', todosData, 'statsData:', statsData);
+
+      setTodos(todosData);
+      setStats(statsData);
+    } catch (error) {
+      console.error('Error loading data:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    loadData();
+  }, [user?.id]);
+
+  useFocusEffect(
+    useCallback(() => {
+      loadData();
+    }, [user?.id])
+  );
+
   const onRefresh = async () => {
     setRefreshing(true);
-    await new Promise(resolve => setTimeout(resolve, 1000));
+    await loadData();
     setRefreshing(false);
   };
 
-  const toggleTodo = (todoId: string) => {
-    setCompletedTodos(prev =>
-      prev.includes(todoId)
-        ? prev.filter(id => id !== todoId)
-        : [...prev, todoId]
-    );
+  const toggleTodo = async (todoId: string) => {
+    if (completedTodos.includes(todoId)) {
+      setCompletedTodos(prev => prev.filter(id => id !== todoId));
+    } else {
+      setCompletedTodos(prev => [...prev, todoId]);
+      setTimeout(async () => {
+        await completeTodo(todoId);
+        setTodos(prev => prev.filter(t => t.id !== todoId));
+        setCompletedTodos(prev => prev.filter(id => id !== todoId));
+      }, 1500);
+    }
   };
 
-  const dringendeTodos = mockTodos.filter(t => t.priority === 'dringend');
-  const normaleTodos = mockTodos.filter(t => t.priority === 'normal');
+  const dringendeTodos = todos.filter(t => t.priority === 'dringend' && !completedTodos.includes(t.id));
+  const normaleTodos = todos.filter(t => t.priority !== 'dringend' && !completedTodos.includes(t.id));
+
+  if (loading) {
+    return (
+      <SafeAreaView style={styles.container} edges={['top']}>
+        <View style={styles.loadingContainer}>
+          <ActivityIndicator size="large" color="#F97316" />
+        </View>
+      </SafeAreaView>
+    );
+  }
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
@@ -124,7 +137,7 @@ export default function HomeScreen() {
             <View style={[styles.statIcon, { backgroundColor: '#FEF3C7' }]}>
               <Feather name="check-circle" size={20} color="#F59E0B" />
             </View>
-            <Text style={styles.statValue}>{mockStats.openTodos}</Text>
+            <Text style={styles.statValue}>{stats.openTodos}</Text>
             <Text style={styles.statLabel}>Offene To-Dos</Text>
           </View>
           
@@ -132,7 +145,7 @@ export default function HomeScreen() {
             <View style={[styles.statIcon, { backgroundColor: '#DBEAFE' }]}>
               <Feather name="home" size={20} color="#3B82F6" />
             </View>
-            <Text style={styles.statValue}>{mockStats.activeObjekte}</Text>
+            <Text style={styles.statValue}>{stats.activeObjekte}</Text>
             <Text style={styles.statLabel}>Aktive Objekte</Text>
           </View>
           
@@ -143,10 +156,20 @@ export default function HomeScreen() {
             <View style={[styles.statIcon, { backgroundColor: '#D1FAE5' }]}>
               <Feather name="trending-up" size={20} color="#22C55E" />
             </View>
-            <Text style={styles.statValue}>€{mockStats.monthlyProvision.toLocaleString()}</Text>
+            <Text style={styles.statValue}>€{stats.monthlyProvision.toLocaleString()}</Text>
             <Text style={styles.statLabel}>Provision MTD</Text>
           </TouchableOpacity>
         </View>
+
+        {todos.length === 0 && (
+          <View style={styles.emptyState}>
+            <View style={styles.emptyIcon}>
+              <Feather name="check-circle" size={48} color="#22C55E" />
+            </View>
+            <Text style={styles.emptyTitle}>Alles erledigt! 🎉</Text>
+            <Text style={styles.emptyText}>Du hast keine offenen Aufgaben.</Text>
+          </View>
+        )}
 
         {dringendeTodos.length > 0 && (
           <View style={styles.section}>
@@ -164,7 +187,7 @@ export default function HomeScreen() {
                 todo={todo}
                 completed={completedTodos.includes(todo.id)}
                 onToggle={() => toggleTodo(todo.id)}
-                onPress={() => router.push(`/chat/${todo.leadId}`)}
+                onPress={() => todo.lead_id ? router.push(`/chat/${todo.lead_id}`) : null}
               />
             ))}
           </View>
@@ -183,7 +206,7 @@ export default function HomeScreen() {
                 todo={todo}
                 completed={completedTodos.includes(todo.id)}
                 onToggle={() => toggleTodo(todo.id)}
-                onPress={() => router.push(`/chat/${todo.leadId}`)}
+                onPress={() => todo.lead_id ? router.push(`/chat/${todo.lead_id}`) : null}
               />
             ))}
           </View>
@@ -201,11 +224,13 @@ function TodoCard({
   onToggle,
   onPress,
 }: {
-  todo: typeof mockTodos[0];
+  todo: Todo;
   completed: boolean;
   onToggle: () => void;
   onPress: () => void;
 }) {
+  const iconConfig = todoIcons[todo.type] || todoIcons.sonstiges;
+  
   return (
     <TouchableOpacity
       style={[styles.todoCard, completed && styles.todoCardCompleted]}
@@ -221,18 +246,26 @@ function TodoCard({
       
       <View style={styles.todoContent}>
         <View style={styles.todoHeader}>
-          <View style={[styles.todoIcon, { backgroundColor: `${todo.color}15` }]}>
-            <Feather name={todo.icon as any} size={16} color={todo.color} />
+          <View style={[styles.todoIcon, { backgroundColor: `${iconConfig.color}15` }]}>
+            <Feather name={iconConfig.icon as any} size={16} color={iconConfig.color} />
           </View>
           <Text style={[styles.todoTitle, completed && styles.todoTitleCompleted]}>
             {todo.title}
           </Text>
         </View>
-        <Text style={styles.todoSubtitle}>{todo.subtitle}</Text>
+        {todo.subtitle && (
+          <Text style={styles.todoSubtitle}>{todo.subtitle}</Text>
+        )}
         <View style={styles.todoFooter}>
-          <Text style={styles.todoContact}>{todo.kontaktName}</Text>
-          <Text style={styles.todoSeparator}>•</Text>
-          <Text style={styles.todoObjekt}>{todo.objektName}</Text>
+          {todo.lead?.name && (
+            <>
+              <Text style={styles.todoContact}>{todo.lead.name}</Text>
+              <Text style={styles.todoSeparator}>•</Text>
+            </>
+          )}
+          {todo.objekt?.name && (
+            <Text style={styles.todoObjekt}>{todo.objekt.name}</Text>
+          )}
         </View>
       </View>
       
@@ -242,195 +275,42 @@ function TodoCard({
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#FFFFFF',
-  },
-  header: {
-    backgroundColor: '#F97316',
-    paddingHorizontal: 20,
-    paddingTop: 8,
-    paddingBottom: 24,
-    borderBottomLeftRadius: 24,
-    borderBottomRightRadius: 24,
-  },
-  headerContent: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-  },
-  greeting: {
-    fontSize: 14,
-    fontFamily: 'DMSans-Regular',
-    color: 'rgba(255,255,255,0.8)',
-  },
-  userName: {
-    fontSize: 24,
-    fontFamily: 'DMSans-Bold',
-    color: '#FFFFFF',
-  },
-  provisionButton: {
-    width: 44,
-    height: 44,
-    borderRadius: 12,
-    backgroundColor: '#FFFFFF',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  scrollView: {
-    flex: 1,
-  },
-  scrollContent: {
-    paddingHorizontal: 20,
-    paddingTop: 20,
-  },
-  statsContainer: {
-    flexDirection: 'row',
-    gap: 12,
-    marginBottom: 24,
-  },
-  statCard: {
-    flex: 1,
-    backgroundColor: '#FFFFFF',
-    borderRadius: 16,
-    padding: 16,
-    alignItems: 'center',
-    borderWidth: 1,
-    borderColor: '#F3F4F6',
-  },
-  statIcon: {
-    width: 40,
-    height: 40,
-    borderRadius: 10,
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginBottom: 8,
-  },
-  statValue: {
-    fontSize: 18,
-    fontFamily: 'DMSans-Bold',
-    color: '#111827',
-    marginBottom: 2,
-  },
-  statLabel: {
-    fontSize: 11,
-    fontFamily: 'DMSans-Regular',
-    color: '#6B7280',
-    textAlign: 'center',
-  },
-  section: {
-    marginBottom: 24,
-  },
-  sectionHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 12,
-  },
-  sectionTitleContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
-  urgentDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    backgroundColor: '#EF4444',
-  },
-  sectionTitle: {
-    fontSize: 16,
-    fontFamily: 'DMSans-SemiBold',
-    color: '#111827',
-  },
-  sectionCount: {
-    fontSize: 14,
-    fontFamily: 'DMSans-Medium',
-    color: '#9CA3AF',
-    backgroundColor: '#F3F4F6',
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: 12,
-  },
-  todoCard: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#FFFFFF',
-    borderRadius: 16,
-    padding: 16,
-    marginBottom: 12,
-    borderWidth: 1,
-    borderColor: '#F3F4F6',
-  },
-  todoCardCompleted: {
-    opacity: 0.6,
-    backgroundColor: '#F9FAFB',
-  },
-  checkbox: {
-    width: 24,
-    height: 24,
-    borderRadius: 8,
-    borderWidth: 2,
-    borderColor: '#D1D5DB',
-    marginRight: 12,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  checkboxCompleted: {
-    backgroundColor: '#22C55E',
-    borderColor: '#22C55E',
-  },
-  todoContent: {
-    flex: 1,
-  },
-  todoHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    marginBottom: 4,
-  },
-  todoIcon: {
-    width: 28,
-    height: 28,
-    borderRadius: 8,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  todoTitle: {
-    fontSize: 15,
-    fontFamily: 'DMSans-SemiBold',
-    color: '#111827',
-    flex: 1,
-  },
-  todoTitleCompleted: {
-    textDecorationLine: 'line-through',
-    color: '#9CA3AF',
-  },
-  todoSubtitle: {
-    fontSize: 13,
-    fontFamily: 'DMSans-Regular',
-    color: '#6B7280',
-    marginBottom: 6,
-    marginLeft: 36,
-  },
-  todoFooter: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginLeft: 36,
-  },
-  todoContact: {
-    fontSize: 12,
-    fontFamily: 'DMSans-Medium',
-    color: '#F97316',
-  },
-  todoSeparator: {
-    fontSize: 12,
-    color: '#D1D5DB',
-    marginHorizontal: 6,
-  },
-  todoObjekt: {
-    fontSize: 12,
-    fontFamily: 'DMSans-Regular',
-    color: '#9CA3AF',
-  },
+  container: { flex: 1, backgroundColor: '#FFFFFF' },
+  loadingContainer: { flex: 1, justifyContent: 'center', alignItems: 'center' },
+  header: { backgroundColor: '#F97316', paddingHorizontal: 20, paddingTop: 8, paddingBottom: 24, borderBottomLeftRadius: 24, borderBottomRightRadius: 24 },
+  headerContent: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  greeting: { fontSize: 14, fontFamily: 'DMSans-Regular', color: 'rgba(255,255,255,0.8)' },
+  userName: { fontSize: 24, fontFamily: 'DMSans-Bold', color: '#FFFFFF' },
+  provisionButton: { width: 44, height: 44, borderRadius: 12, backgroundColor: '#FFFFFF', justifyContent: 'center', alignItems: 'center' },
+  scrollView: { flex: 1 },
+  scrollContent: { paddingHorizontal: 20, paddingTop: 20 },
+  statsContainer: { flexDirection: 'row', gap: 12, marginBottom: 24 },
+  statCard: { flex: 1, backgroundColor: '#FFFFFF', borderRadius: 16, padding: 16, alignItems: 'center', borderWidth: 1, borderColor: '#F3F4F6' },
+  statIcon: { width: 40, height: 40, borderRadius: 10, justifyContent: 'center', alignItems: 'center', marginBottom: 8 },
+  statValue: { fontSize: 18, fontFamily: 'DMSans-Bold', color: '#111827', marginBottom: 2 },
+  statLabel: { fontSize: 11, fontFamily: 'DMSans-Regular', color: '#6B7280', textAlign: 'center' },
+  emptyState: { alignItems: 'center', paddingVertical: 60 },
+  emptyIcon: { width: 80, height: 80, borderRadius: 40, backgroundColor: '#D1FAE5', justifyContent: 'center', alignItems: 'center', marginBottom: 16 },
+  emptyTitle: { fontSize: 20, fontFamily: 'DMSans-SemiBold', color: '#111827', marginBottom: 4 },
+  emptyText: { fontSize: 14, fontFamily: 'DMSans-Regular', color: '#6B7280' },
+  section: { marginBottom: 24 },
+  sectionHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 },
+  sectionTitleContainer: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  urgentDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: '#EF4444' },
+  sectionTitle: { fontSize: 16, fontFamily: 'DMSans-SemiBold', color: '#111827' },
+  sectionCount: { fontSize: 14, fontFamily: 'DMSans-Medium', color: '#9CA3AF', backgroundColor: '#F3F4F6', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 12 },
+  todoCard: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#FFFFFF', borderRadius: 16, padding: 16, marginBottom: 12, borderWidth: 1, borderColor: '#F3F4F6' },
+  todoCardCompleted: { opacity: 0.6, backgroundColor: '#F9FAFB' },
+  checkbox: { width: 24, height: 24, borderRadius: 8, borderWidth: 2, borderColor: '#D1D5DB', marginRight: 12, justifyContent: 'center', alignItems: 'center' },
+  checkboxCompleted: { backgroundColor: '#22C55E', borderColor: '#22C55E' },
+  todoContent: { flex: 1 },
+  todoHeader: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 4 },
+  todoIcon: { width: 28, height: 28, borderRadius: 8, justifyContent: 'center', alignItems: 'center' },
+  todoTitle: { fontSize: 15, fontFamily: 'DMSans-SemiBold', color: '#111827', flex: 1 },
+  todoTitleCompleted: { textDecorationLine: 'line-through', color: '#9CA3AF' },
+  todoSubtitle: { fontSize: 13, fontFamily: 'DMSans-Regular', color: '#6B7280', marginBottom: 6, marginLeft: 36 },
+  todoFooter: { flexDirection: 'row', alignItems: 'center', marginLeft: 36 },
+  todoContact: { fontSize: 12, fontFamily: 'DMSans-Medium', color: '#F97316' },
+  todoSeparator: { fontSize: 12, color: '#D1D5DB', marginHorizontal: 6 },
+  todoObjekt: { fontSize: 12, fontFamily: 'DMSans-Regular', color: '#9CA3AF' },
 });

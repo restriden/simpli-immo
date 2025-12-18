@@ -42,7 +42,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   };
 
   useEffect(() => {
+    console.log('[DEBUG AUTH] Initializing auth...');
+
     supabase.auth.getSession().then(({ data: { session } }) => {
+      console.log('[DEBUG AUTH] getSession result - session:', session ? 'exists' : 'null', 'user.id:', session?.user?.id);
       setSession(session);
       setUser(session?.user ?? null);
       if (session?.user) {
@@ -53,6 +56,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       async (event, session) => {
+        console.log('[DEBUG AUTH] onAuthStateChange - event:', event, 'user.id:', session?.user?.id);
         setSession(session);
         setUser(session?.user ?? null);
         if (session?.user) {
