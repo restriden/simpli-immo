@@ -154,10 +154,46 @@ async function handleMatch(supabase: any, params: any): Promise<Response> {
       console.error("Error updating lead:", updateError);
     } else {
       console.log(`Lead ${lead_id} assigned to objekt ${result.objekt_id}`);
+
+      // 4. If matched to existing objekt, sync ki_wissen to GHL contact
+      if (result.action === 'matched') {
+        await syncKiWissenToGHL(lead_id, result.objekt_id, user_id);
+      }
     }
   }
 
   return jsonResponse({ success: true, ...result });
+}
+
+/**
+ * Sync ki_wissen to GHL contact field
+ */
+async function syncKiWissenToGHL(leadId: string, objektId: string, userId: string) {
+  try {
+    const syncUrl = `${SUPABASE_URL}/functions/v1/sync-ki-wissen`;
+
+    const response = await fetch(syncUrl, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
+      },
+      body: JSON.stringify({
+        lead_id: leadId,
+        objekt_id: objektId,
+        user_id: userId,
+      }),
+    });
+
+    if (response.ok) {
+      console.log('Ki-Wissen synced to GHL for new lead');
+    } else {
+      console.error('Ki-Wissen sync failed:', await response.text());
+    }
+  } catch (err) {
+    // Don't fail the main operation if sync fails
+    console.error('GHL sync error (non-blocking):', err);
+  }
 }
 
 /**
