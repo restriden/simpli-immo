@@ -395,17 +395,96 @@ function extractObjektName(contactData: any): string | null {
 }
 
 /**
+ * Common prefixes/suffixes to strip before matching
+ */
+const STATUS_PREFIXES = [
+  'reserviert',
+  'verkauft',
+  'neu',
+  'new',
+  'sold',
+  'reserved',
+  'vermietet',
+  'rented',
+  'exklusiv',
+  'exclusive',
+  'reduziert',
+  'reduced',
+  'top',
+  'hot',
+  'premium',
+  'highlight',
+  'angebot',
+  'offer',
+];
+
+/**
+ * Normalize string for matching - removes status prefixes, handles umlauts
+ */
+function normalizeForMatching(str: string): string {
+  let normalized = str.toLowerCase().trim();
+
+  // Remove status prefixes at the beginning
+  for (const prefix of STATUS_PREFIXES) {
+    // Match prefix followed by space, colon, dash, or directly attached
+    const patterns = [
+      new RegExp(`^${prefix}\\s+`, 'i'),      // "RESERVIERT Schöne Villa"
+      new RegExp(`^${prefix}:\\s*`, 'i'),      // "RESERVIERT: Schöne Villa"
+      new RegExp(`^${prefix}-\\s*`, 'i'),      // "RESERVIERT- Schöne Villa"
+      new RegExp(`^\\[${prefix}\\]\\s*`, 'i'), // "[RESERVIERT] Schöne Villa"
+      new RegExp(`^\\(${prefix}\\)\\s*`, 'i'), // "(RESERVIERT) Schöne Villa"
+    ];
+
+    for (const pattern of patterns) {
+      normalized = normalized.replace(pattern, '');
+    }
+  }
+
+  // Also remove status suffixes at the end
+  for (const suffix of STATUS_PREFIXES) {
+    const patterns = [
+      new RegExp(`\\s+${suffix}$`, 'i'),       // "Schöne Villa RESERVIERT"
+      new RegExp(`\\s*-\\s*${suffix}$`, 'i'),  // "Schöne Villa - RESERVIERT"
+      new RegExp(`\\s*\\[${suffix}\\]$`, 'i'), // "Schöne Villa [RESERVIERT]"
+      new RegExp(`\\s*\\(${suffix}\\)$`, 'i'), // "Schöne Villa (RESERVIERT)"
+    ];
+
+    for (const pattern of patterns) {
+      normalized = normalized.replace(pattern, '');
+    }
+  }
+
+  // Normalize common umlaut variations
+  normalized = normalized
+    .replace(/ü/g, 'u')
+    .replace(/ä/g, 'a')
+    .replace(/ö/g, 'o')
+    .replace(/ß/g, 'ss')
+    .replace(/ue/g, 'u')
+    .replace(/ae/g, 'a')
+    .replace(/oe/g, 'o');
+
+  // Remove extra whitespace
+  normalized = normalized.replace(/\s+/g, ' ').trim();
+
+  return normalized;
+}
+
+/**
  * Calculate similarity score between two strings (0-1)
  */
 function calculateMatchScore(search: string, target: string): number {
-  const s1 = search.toLowerCase().trim();
-  const s2 = target.toLowerCase().trim();
+  // First normalize both strings (remove prefixes like RESERVIERT)
+  const s1 = normalizeForMatching(search);
+  const s2 = normalizeForMatching(target);
 
-  // Exact match
+  console.log(`Comparing normalized: "${s1}" vs "${s2}"`);
+
+  // Exact match after normalization
   if (s1 === s2) return 1.0;
 
-  // One contains the other
-  if (s1.includes(s2) || s2.includes(s1)) return 0.9;
+  // One contains the other (after normalization)
+  if (s1.includes(s2) || s2.includes(s1)) return 0.95;
 
   // Levenshtein-based similarity
   const maxLen = Math.max(s1.length, s2.length);
@@ -414,19 +493,31 @@ function calculateMatchScore(search: string, target: string): number {
   const distance = levenshteinDistance(s1, s2);
   const similarity = 1 - (distance / maxLen);
 
-  // Also check word overlap
-  const words1 = s1.split(/\s+/);
-  const words2 = s2.split(/\s+/);
+  // Also check word overlap (excluding common filler words)
+  const fillerWords = ['in', 'im', 'am', 'an', 'der', 'die', 'das', 'ein', 'eine', 'mit', 'und'];
+  const words1 = s1.split(/\s+/).filter(w => !fillerWords.includes(w) && w.length > 2);
+  const words2 = s2.split(/\s+/).filter(w => !fillerWords.includes(w) && w.length > 2);
+
   let wordMatches = 0;
   for (const w1 of words1) {
-    if (words2.some(w2 => w2.includes(w1) || w1.includes(w2))) {
+    // Check for exact word match or close match (1-2 char diff for typos)
+    if (words2.some(w2 => {
+      if (w2 === w1) return true;
+      if (w2.includes(w1) || w1.includes(w2)) return true;
+      // Allow 1-2 character difference for typos (e.g., "Lübeck" vs "Lübck")
+      if (Math.abs(w1.length - w2.length) <= 2 && levenshteinDistance(w1, w2) <= 2) return true;
+      return false;
+    })) {
       wordMatches++;
     }
   }
   const wordSimilarity = words1.length > 0 ? wordMatches / words1.length : 0;
 
   // Return best score
-  return Math.max(similarity, wordSimilarity);
+  const finalScore = Math.max(similarity, wordSimilarity);
+  console.log(`Match scores - Levenshtein: ${similarity.toFixed(2)}, Word: ${wordSimilarity.toFixed(2)}, Final: ${finalScore.toFixed(2)}`);
+
+  return finalScore;
 }
 
 /**
