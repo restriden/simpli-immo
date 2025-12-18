@@ -16,34 +16,32 @@ import {
 
 export default function ProfilScreen() {
   const router = useRouter();
-  const { user, profile, signOut } = useAuth();
+  const { user, profile, signOut, loading: authLoading } = useAuth();
 
   // GHL Connection State
   const [ghlConnection, setGhlConnection] = useState<GHLConnection | null>(null);
-  const [ghlLoading, setGhlLoading] = useState(true);
+  const [ghlLoading, setGhlLoading] = useState(false);
   const [ghlConnecting, setGhlConnecting] = useState(false);
   const [ghlSyncing, setGhlSyncing] = useState(false);
 
   // Load GHL connection status
   const loadGHLStatus = async () => {
-    console.log('[PROFIL] loadGHLStatus called, user?.id:', user?.id);
+    console.log('[PROFIL] loadGHLStatus called, user?.id:', user?.id, 'authLoading:', authLoading);
+
+    if (authLoading) {
+      console.log('[PROFIL] Auth still loading, skipping GHL check');
+      return;
+    }
 
     if (!user?.id) {
-      console.log('[PROFIL] No user.id, setting ghlLoading to false');
+      console.log('[PROFIL] No user.id, not loading GHL');
       setGhlLoading(false);
       return;
     }
 
+    setGhlLoading(true);
     try {
       console.log('[PROFIL] User ID for GHL check:', user.id);
-
-      // Run debug check first to see all data
-      const debugInfo = await debugGHLConnections(user.id);
-      console.log('[PROFIL] Debug info - all connections:', debugInfo.allConnections.length);
-      console.log('[PROFIL] Debug info - active connection:', debugInfo.activeConnection);
-      console.log('[PROFIL] Debug info - error:', debugInfo.error);
-
-      console.log('[PROFIL] Checking GHL connection...');
       const connection = await checkGHLConnection(user.id);
       console.log('[PROFIL] GHL connection result:', connection);
       setGhlConnection(connection);
@@ -56,14 +54,18 @@ export default function ProfilScreen() {
   };
 
   useEffect(() => {
-    loadGHLStatus();
-  }, [user?.id]);
+    if (!authLoading) {
+      loadGHLStatus();
+    }
+  }, [user?.id, authLoading]);
 
   // Reload on focus (after OAuth redirect)
   useFocusEffect(
     useCallback(() => {
-      loadGHLStatus();
-    }, [user?.id])
+      if (!authLoading && user?.id) {
+        loadGHLStatus();
+      }
+    }, [user?.id, authLoading])
   );
 
   // Handle GHL Connect
