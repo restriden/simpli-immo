@@ -313,6 +313,115 @@ export async function debugGHLConnections(userId: string): Promise<{
 }
 
 /**
+ * Send a message via GHL
+ */
+export async function sendGHLMessage(
+  userId: string,
+  leadId: string,
+  message: string,
+  type: 'SMS' | 'WhatsApp' | 'Email' = 'WhatsApp'
+): Promise<{ success: boolean; messageId?: string; error?: string }> {
+  try {
+    const { data: { session } } = await supabase.auth.getSession();
+
+    if (!session?.access_token) {
+      return { success: false, error: 'Not authenticated' };
+    }
+
+    const response = await fetch(`${SUPABASE_FUNCTIONS_URL}/ghl-send-message`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${session.access_token}`,
+      },
+      body: JSON.stringify({
+        user_id: userId,
+        lead_id: leadId,
+        message,
+        type,
+      }),
+    });
+
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}));
+      return { success: false, error: errorData.error || `Failed: ${response.status}` };
+    }
+
+    const result = await response.json();
+    return { success: true, messageId: result.message_id };
+  } catch (error) {
+    console.error('[GHL] Send message error:', error);
+    return { success: false, error: error instanceof Error ? error.message : 'Unknown error' };
+  }
+}
+
+/**
+ * Subscribe to real-time message updates for a lead
+ * Returns an unsubscribe function
+ */
+export function subscribeToMessages(
+  leadId: string,
+  onMessage: (message: any) => void
+): () => void {
+  console.log('[GHL] Subscribing to messages for lead:', leadId);
+
+  const channel = supabase
+    .channel(`messages:${leadId}`)
+    .on(
+      'postgres_changes',
+      {
+        event: 'INSERT',
+        schema: 'public',
+        table: 'messages',
+        filter: `lead_id=eq.${leadId}`,
+      },
+      (payload) => {
+        console.log('[GHL] New message received:', payload.new);
+        onMessage(payload.new);
+      }
+    )
+    .subscribe();
+
+  // Return unsubscribe function
+  return () => {
+    console.log('[GHL] Unsubscribing from messages for lead:', leadId);
+    supabase.removeChannel(channel);
+  };
+}
+
+/**
+ * Subscribe to all message updates for a user (all leads)
+ */
+export function subscribeToAllMessages(
+  userId: string,
+  onMessage: (message: any) => void
+): () => void {
+  console.log('[GHL] Subscribing to all messages for user:', userId);
+
+  const channel = supabase
+    .channel(`user_messages:${userId}`)
+    .on(
+      'postgres_changes',
+      {
+        event: 'INSERT',
+        schema: 'public',
+        table: 'messages',
+        filter: `user_id=eq.${userId}`,
+      },
+      (payload) => {
+        console.log('[GHL] New message for user:', payload.new);
+        onMessage(payload.new);
+      }
+    )
+    .subscribe();
+
+  return () => {
+    console.log('[GHL] Unsubscribing from all messages');
+    supabase.removeChannel(channel);
+  };
+}
+
+/**
  * Format last sync time for display
  */
 export function formatLastSync(lastSyncAt: string | null): string {
