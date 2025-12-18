@@ -45,10 +45,10 @@ serve(async (req: Request) => {
       return jsonResponse({ error: "Missing required fields" }, 400);
     }
 
-    // Get the todo to find the GHL task ID
+    // Get the todo to find the GHL task ID and contact ID
     const { data: todo, error: todoError } = await supabase
       .from("todos")
-      .select("ghl_task_id, ghl_event_id")
+      .select("ghl_task_id, ghl_event_id, ghl_data, lead_id")
       .eq("id", todo_id)
       .single();
 
@@ -57,6 +57,20 @@ serve(async (req: Request) => {
     }
 
     const ghlTaskId = todo.ghl_task_id || todo.ghl_event_id;
+
+    // Get contactId from ghl_data or from the linked lead
+    let contactId = todo.ghl_data?.contactId || todo.ghl_data?.contact_id;
+
+    if (!contactId && todo.lead_id) {
+      const { data: lead } = await supabase
+        .from("leads")
+        .select("ghl_contact_id")
+        .eq("id", todo.lead_id)
+        .single();
+      contactId = lead?.ghl_contact_id;
+    }
+
+    console.log("Task ID:", ghlTaskId, "Contact ID:", contactId);
 
     if (!ghlTaskId) {
       // No GHL task ID - just update locally
@@ -104,43 +118,52 @@ serve(async (req: Request) => {
       "Content-Type": "application/json",
     };
 
-    console.log("Updating task in GHL:", ghlTaskId);
-
-    // Try to update the task status in GHL
-    const updateUrl = `${GHL_API_BASE}/contacts/tasks/${ghlTaskId}/status`;
-    const updateResponse = await fetch(updateUrl, {
-      method: "PUT",
-      headers,
-      body: JSON.stringify({
-        completed: completed,
-      }),
-    });
+    console.log("Updating task in GHL:", ghlTaskId, "Contact:", contactId);
 
     let ghlSynced = false;
-    if (updateResponse.ok) {
-      console.log("Task updated in GHL successfully");
-      ghlSynced = true;
-    } else {
-      const errorText = await updateResponse.text();
-      console.error("Failed to update task in GHL:", updateResponse.status, errorText);
 
-      // Try alternative endpoint
-      const altUrl = `${GHL_API_BASE}/contacts/tasks/${ghlTaskId}`;
-      const altResponse = await fetch(altUrl, {
+    if (contactId && ghlTaskId) {
+      // Use correct endpoint with contactId: PUT /contacts/{contactId}/tasks/{taskId}/completed
+      const updateUrl = `${GHL_API_BASE}/contacts/${contactId}/tasks/${ghlTaskId}/completed`;
+      console.log("Update URL:", updateUrl);
+
+      const updateResponse = await fetch(updateUrl, {
         method: "PUT",
         headers,
         body: JSON.stringify({
-          status: completed ? "completed" : "pending",
           completed: completed,
         }),
       });
 
-      if (altResponse.ok) {
-        console.log("Task updated in GHL via alternative endpoint");
+      if (updateResponse.ok) {
+        console.log("Task updated in GHL successfully");
         ghlSynced = true;
       } else {
-        console.error("Alternative endpoint also failed:", await altResponse.text());
+        const errorText = await updateResponse.text();
+        console.error("Failed to update task in GHL:", updateResponse.status, errorText);
+
+        // Try alternative endpoint: PUT /contacts/{contactId}/tasks/{taskId}
+        const altUrl = `${GHL_API_BASE}/contacts/${contactId}/tasks/${ghlTaskId}`;
+        console.log("Trying alternative URL:", altUrl);
+
+        const altResponse = await fetch(altUrl, {
+          method: "PUT",
+          headers,
+          body: JSON.stringify({
+            status: completed ? "completed" : "pending",
+            completed: completed,
+          }),
+        });
+
+        if (altResponse.ok) {
+          console.log("Task updated in GHL via alternative endpoint");
+          ghlSynced = true;
+        } else {
+          console.error("Alternative endpoint also failed:", await altResponse.text());
+        }
       }
+    } else {
+      console.log("Missing contactId or taskId for GHL sync");
     }
 
     // Update locally
