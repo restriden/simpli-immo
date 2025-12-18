@@ -74,7 +74,7 @@ export default function KiWissenScreen() {
       }
 
       const response = await fetch(
-        `${process.env.EXPO_PUBLIC_SUPABASE_URL}/functions/v1/sync-ki-wissen`,
+        `https://hsfrdovpgxtqbitmkrhs.supabase.co/functions/v1/sync-ki-wissen`,
         {
           method: 'POST',
           headers: {

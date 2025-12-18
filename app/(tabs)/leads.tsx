@@ -183,7 +183,7 @@ export default function LeadsScreen() {
       }
 
       const response = await fetch(
-        `${process.env.EXPO_PUBLIC_SUPABASE_URL}/functions/v1/ghl-create-contact`,
+        `https://hsfrdovpgxtqbitmkrhs.supabase.co/functions/v1/ghl-create-contact`,
         {
           method: 'POST',
           headers: {
