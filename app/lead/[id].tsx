@@ -124,16 +124,6 @@ export default function LeadProfileScreen() {
     Linking.openURL(`tel:${lead.phone}`);
   };
 
-  const handleWhatsApp = () => {
-    if (!lead?.phone) {
-      Alert.alert('Keine Telefonnummer', 'Für diesen Kontakt ist keine Telefonnummer hinterlegt.');
-      return;
-    }
-    // Remove non-numeric characters and add country code if needed
-    const phone = lead.phone.replace(/\D/g, '');
-    Linking.openURL(`whatsapp://send?phone=${phone}`);
-  };
-
   const handleEmail = () => {
     if (!lead?.email) {
       Alert.alert('Keine E-Mail', 'Für diesen Kontakt ist keine E-Mail hinterlegt.');
@@ -239,13 +229,6 @@ export default function LeadProfileScreen() {
               <Feather name="phone" size={20} color="#22C55E" />
             </View>
             <Text style={styles.actionLabel}>Anrufen</Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity style={styles.actionButton} onPress={handleWhatsApp}>
-            <View style={[styles.actionIcon, { backgroundColor: '#D1FAE5' }]}>
-              <Feather name="message-circle" size={20} color="#22C55E" />
-            </View>
-            <Text style={styles.actionLabel}>WhatsApp</Text>
           </TouchableOpacity>
 
           <TouchableOpacity style={styles.actionButton} onPress={handleEmail}>
