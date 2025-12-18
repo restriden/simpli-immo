@@ -787,8 +787,8 @@ async function syncTasks(
             ghl_task_id: task.id,
             type: todoType,
             priority: priority,
-            title: task.title || task.name || "Aufgabe",
-            subtitle: task.description || task.body || task.notes || null,
+            title: stripHtml(task.title || task.name) || "Aufgabe",
+            subtitle: stripHtml(task.description || task.body || task.notes),
             completed: isCompleted,
             due_date: task.dueDate || task.due_date || null,
             ghl_data: task,
@@ -849,6 +849,20 @@ async function logSync(
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function stripHtml(html: string | null | undefined): string | null {
+  if (!html) return null;
+  // Remove HTML tags and decode common entities
+  return html
+    .replace(/<[^>]*>/g, '')
+    .replace(/&nbsp;/g, ' ')
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .trim() || null;
 }
 
 function jsonResponse(data: any, status = 200): Response {

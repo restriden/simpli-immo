@@ -63,10 +63,11 @@ serve(async (req: Request) => {
       console.log("No GHL task ID, updating locally only");
       const { error: updateError } = await supabase
         .from("todos")
-        .update({ completed, updated_at: new Date().toISOString() })
+        .update({ completed })
         .eq("id", todo_id);
 
       if (updateError) {
+        console.error("Error updating todo:", updateError);
         return jsonResponse({ error: "Failed to update todo" }, 500);
       }
 
@@ -86,7 +87,7 @@ serve(async (req: Request) => {
       console.log("No GHL connection, updating locally only");
       const { error: updateError } = await supabase
         .from("todos")
-        .update({ completed, updated_at: new Date().toISOString() })
+        .update({ completed })
         .eq("id", todo_id);
 
       if (updateError) {
@@ -145,7 +146,7 @@ serve(async (req: Request) => {
     // Update locally
     const { error: updateError } = await supabase
       .from("todos")
-      .update({ completed, updated_at: new Date().toISOString() })
+      .update({ completed })
       .eq("id", todo_id);
 
     if (updateError) {
