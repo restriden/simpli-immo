@@ -301,9 +301,11 @@ async function handleContact(supabase: any, connection: any, payload: any) {
   // Check if lead exists
   const { data: existing } = await supabase
     .from("leads")
-    .select("id")
+    .select("id, objekt_id")
     .eq("ghl_contact_id", contact.id)
     .single();
+
+  let leadId: string;
 
   if (existing) {
     // Update existing lead
@@ -314,17 +316,57 @@ async function handleContact(supabase: any, connection: any, payload: any) {
 
     if (error) {
       console.error("Error updating lead:", error);
-    } else {
-      console.log("Lead updated:", existing.id);
+      return;
     }
+    leadId = existing.id;
+    console.log("Lead updated:", existing.id);
   } else {
     // Create new lead
-    const { error } = await supabase.from("leads").insert(leadData);
+    const { data: newLead, error } = await supabase
+      .from("leads")
+      .insert(leadData)
+      .select("id")
+      .single();
 
-    if (error) {
+    if (error || !newLead) {
       console.error("Error creating lead:", error);
-    } else {
-      console.log("Lead created for contact:", contact.id);
+      return;
+    }
+    leadId = newLead.id;
+    console.log("Lead created for contact:", contact.id);
+  }
+
+  // Auto-assign lead to objekt based on contact custom fields
+  // Only if lead doesn't already have an objekt assigned
+  if (!existing?.objekt_id) {
+    try {
+      const matcherUrl = `${Deno.env.get("SUPABASE_URL")}/functions/v1/objekt-matcher`;
+      const matchResponse = await fetch(matcherUrl, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")}`,
+        },
+        body: JSON.stringify({
+          action: "match",
+          contact_data: contact,
+          user_id: connection.user_id,
+          lead_id: leadId,
+        }),
+      });
+
+      if (matchResponse.ok) {
+        const matchResult = await matchResponse.json();
+        if (matchResult.action === 'matched') {
+          console.log(`Auto-assigned lead to existing objekt: ${matchResult.objekt_name}`);
+        } else if (matchResult.action === 'created') {
+          console.log(`Created new objekt and assigned lead: ${matchResult.objekt_name}`);
+        } else {
+          console.log("No objekt field found in contact data");
+        }
+      }
+    } catch (matchError) {
+      console.error("Error calling objekt-matcher:", matchError);
     }
   }
 }

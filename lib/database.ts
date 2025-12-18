@@ -494,3 +494,52 @@ export async function getDashboardStats(userId: string) {
     monthlyProvision,
   };
 }
+
+// ============ OBJEKT MERGE ============
+
+export interface MergeResult {
+  success: boolean;
+  message?: string;
+  error?: string;
+  stats?: {
+    leads_moved: number;
+    ki_wissen_moved: number;
+    todos_moved: number;
+  };
+}
+
+export async function mergeObjekte(
+  sourceObjektId: string,
+  targetObjektId: string,
+  userId: string
+): Promise<MergeResult> {
+  try {
+    const { data: session } = await supabase.auth.getSession();
+    if (!session?.session?.access_token) {
+      return { success: false, error: 'Not authenticated' };
+    }
+
+    const response = await fetch(
+      `https://hsfrdovpgxtqbitmkrhs.supabase.co/functions/v1/objekt-matcher`,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${session.session.access_token}`,
+        },
+        body: JSON.stringify({
+          action: 'merge',
+          source_objekt_id: sourceObjektId,
+          target_objekt_id: targetObjektId,
+          user_id: userId,
+        }),
+      }
+    );
+
+    const result = await response.json();
+    return result;
+  } catch (error) {
+    console.error('Error merging objekte:', error);
+    return { success: false, error: 'Network error' };
+  }
+}
