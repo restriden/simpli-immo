@@ -6,11 +6,35 @@ import {
   TouchableOpacity,
   StyleSheet,
   ActivityIndicator,
+  Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { Feather } from '@expo/vector-icons';
-import { getObjekt, getLeadsByObjekt, getObjektStats, Objekt, Lead } from '../../lib/database';
+import { getObjekt, getLeadsByObjekt, getObjektStats, Objekt, Lead, supabase } from '../../lib/database';
+
+type FinancingMode = 'simpli_pflicht' | 'finanzierung_pflicht' | 'keine_pflicht';
+
+const financingModes: Record<FinancingMode, { label: string; desc: string; color: string; bg: string }> = {
+  simpli_pflicht: {
+    label: 'Simpli Finance Pflicht',
+    desc: 'Finanzierung über Simpli Finance erforderlich (mit Provision)',
+    color: '#F97316',
+    bg: '#FFF7ED',
+  },
+  finanzierung_pflicht: {
+    label: 'Finanzierung Pflicht',
+    desc: 'Finanzierungsbestätigung erforderlich (extern möglich)',
+    color: '#3B82F6',
+    bg: '#EFF6FF',
+  },
+  keine_pflicht: {
+    label: 'Keine Pflicht',
+    desc: 'Besichtigung ohne Finanzierungsbestätigung möglich',
+    color: '#6B7280',
+    bg: '#F3F4F6',
+  },
+};
 
 const statusLabels: Record<string, { label: string; color: string; bg: string }> = {
   aktiv: { label: 'Aktiv', color: '#22C55E', bg: '#D1FAE5' },
@@ -32,6 +56,8 @@ export default function ObjektDetailScreen() {
     besichtigungen: 0,
   });
   const [loading, setLoading] = useState(true);
+  const [financingMode, setFinancingMode] = useState<FinancingMode>('keine_pflicht');
+  const [savingFinancing, setSavingFinancing] = useState(false);
 
   useEffect(() => {
     loadData();
@@ -50,10 +76,41 @@ export default function ObjektDetailScreen() {
       setObjekt(objektData);
       setLeads(leadsData);
       setStats(statsData);
+
+      // Set financing mode from objekt (with fallback)
+      if (objektData?.financing_mode) {
+        setFinancingMode(objektData.financing_mode as FinancingMode);
+      }
     } catch (error) {
       console.error('Error loading objekt:', error);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const updateFinancingMode = async (mode: FinancingMode) => {
+    if (savingFinancing || !objektId) return;
+
+    const previousMode = financingMode;
+    setSavingFinancing(true);
+    setFinancingMode(mode); // Optimistic update
+
+    try {
+      const { error } = await supabase
+        .from('objekte')
+        .update({ financing_mode: mode })
+        .eq('id', objektId);
+
+      if (error) throw error;
+
+      const modeInfo = financingModes[mode];
+      Alert.alert('Finanzierung aktualisiert', `${modeInfo.label} ist jetzt aktiv.`);
+    } catch (error) {
+      console.error('Error updating financing mode:', error);
+      setFinancingMode(previousMode); // Revert on error
+      Alert.alert('Fehler', 'Finanzierungsmodus konnte nicht gespeichert werden.');
+    } finally {
+      setSavingFinancing(false);
     }
   };
 
@@ -187,6 +244,58 @@ export default function ObjektDetailScreen() {
           </TouchableOpacity>
         </View>
 
+        {/* Financing Mode */}
+        <View style={styles.financingSection}>
+          <Text style={styles.sectionTitle}>Finanzierung für Besichtigung</Text>
+          <Text style={styles.financingSubtitle}>
+            Legt fest, ob Interessenten eine Finanzierungsbestätigung brauchen
+          </Text>
+
+          {(Object.keys(financingModes) as FinancingMode[]).map((mode) => {
+            const modeInfo = financingModes[mode];
+            const isActive = financingMode === mode;
+
+            return (
+              <TouchableOpacity
+                key={mode}
+                style={[
+                  styles.financingOption,
+                  isActive && { borderColor: modeInfo.color, backgroundColor: modeInfo.bg },
+                ]}
+                onPress={() => updateFinancingMode(mode)}
+                disabled={savingFinancing}
+              >
+                <View style={styles.financingOptionLeft}>
+                  <View
+                    style={[
+                      styles.radioOuter,
+                      isActive && { borderColor: modeInfo.color },
+                    ]}
+                  >
+                    {isActive && (
+                      <View style={[styles.radioInner, { backgroundColor: modeInfo.color }]} />
+                    )}
+                  </View>
+                  <View style={styles.financingOptionText}>
+                    <Text style={[styles.financingLabel, isActive && { color: modeInfo.color }]}>
+                      {modeInfo.label}
+                      {mode === 'simpli_pflicht' && (
+                        <Text style={styles.recommendedTag}> (Empfohlen)</Text>
+                      )}
+                    </Text>
+                    <Text style={styles.financingDesc}>{modeInfo.desc}</Text>
+                  </View>
+                </View>
+                {mode === 'simpli_pflicht' && (
+                  <View style={styles.provisionBadge}>
+                    <Feather name="dollar-sign" size={12} color="#22C55E" />
+                  </View>
+                )}
+              </TouchableOpacity>
+            );
+          })}
+        </View>
+
         {/* Leads */}
         <View style={styles.leadsSection}>
           <View style={styles.sectionHeader}>
@@ -271,4 +380,44 @@ const styles = StyleSheet.create({
   leadContent: { flex: 1, marginLeft: 12 },
   leadName: { fontSize: 15, fontFamily: 'DMSans-SemiBold', color: '#111827' },
   leadStatus: { fontSize: 13, fontFamily: 'DMSans-Regular', color: '#6B7280', marginTop: 2 },
+
+  // Financing section styles
+  financingSection: { paddingHorizontal: 20, marginBottom: 20 },
+  financingSubtitle: { fontSize: 13, fontFamily: 'DMSans-Regular', color: '#6B7280', marginBottom: 16 },
+  financingOption: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: '#FFFFFF',
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 10,
+    borderWidth: 2,
+    borderColor: '#E5E7EB',
+  },
+  financingOptionLeft: { flexDirection: 'row', alignItems: 'center', flex: 1 },
+  radioOuter: {
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    borderWidth: 2,
+    borderColor: '#D1D5DB',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 12,
+  },
+  radioInner: { width: 12, height: 12, borderRadius: 6 },
+  financingOptionText: { flex: 1 },
+  financingLabel: { fontSize: 15, fontFamily: 'DMSans-SemiBold', color: '#111827' },
+  recommendedTag: { fontSize: 12, fontFamily: 'DMSans-Regular', color: '#22C55E' },
+  financingDesc: { fontSize: 12, fontFamily: 'DMSans-Regular', color: '#6B7280', marginTop: 2 },
+  provisionBadge: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: '#D1FAE5',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginLeft: 8,
+  },
 });

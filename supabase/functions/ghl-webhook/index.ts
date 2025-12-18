@@ -205,55 +205,72 @@ async function handleMessage(supabase: any, connection: any, payload: any) {
     })
     .eq("id", lead.id);
 
-  // Analyze incoming messages with AI (async, don't block webhook response)
+  // Process messages with AI
   if (isInbound) {
+    // INCOMING: Analyze + potentially auto-respond (combined in one function)
     try {
-      const analyzeUrl = `${Deno.env.get("SUPABASE_URL")}/functions/v1/analyze-message`;
-      const analyzeResponse = await fetch(analyzeUrl, {
+      // Get the inserted message ID for updating with analysis
+      const { data: insertedMsg } = await supabase
+        .from("messages")
+        .select("id")
+        .eq("ghl_message_id", messageData.ghl_message_id)
+        .single();
+
+      const handlerUrl = `${Deno.env.get("SUPABASE_URL")}/functions/v1/message-handler`;
+      const handlerResponse = await fetch(handlerUrl, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
           "Authorization": `Bearer ${Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")}`,
         },
         body: JSON.stringify({
+          message_id: insertedMsg?.id,
           message_content: messageBody,
           lead_id: lead.id,
+          user_id: connection.user_id,
         }),
       });
 
-      if (analyzeResponse.ok) {
-        const analysisResult = await analyzeResponse.json();
-        console.log("Message analysis result:", analysisResult);
-
-        // If AI can auto-respond and it's a question, try to send auto-response
-        if (analysisResult.analysis?.can_auto_respond && analysisResult.analysis?.is_question) {
-          console.log("Attempting auto-response...");
-          const autoRespondUrl = `${Deno.env.get("SUPABASE_URL")}/functions/v1/auto-respond`;
-          const autoResponse = await fetch(autoRespondUrl, {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              "Authorization": `Bearer ${Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")}`,
-            },
-            body: JSON.stringify({
-              lead_id: lead.id,
-              message_content: messageBody,
-              user_id: connection.user_id,
-            }),
-          });
-
-          if (autoResponse.ok) {
-            const autoResult = await autoResponse.json();
-            console.log("Auto-response result:", autoResult);
-          } else {
-            console.log("Auto-response skipped or failed:", await autoResponse.text());
-          }
+      if (handlerResponse.ok) {
+        const result = await handlerResponse.json();
+        console.log("Message handler result:", result);
+        if (result.response_sent) {
+          console.log("Auto-response was sent");
+        }
+        if (result.created_task) {
+          console.log("Task created:", result.created_task.id);
         }
       } else {
-        console.error("Message analysis failed:", await analyzeResponse.text());
+        console.error("Message handler failed:", await handlerResponse.text());
       }
-    } catch (analyzeError) {
-      console.error("Error calling analyze-message:", analyzeError);
+    } catch (handlerError) {
+      console.error("Error calling message-handler:", handlerError);
+    }
+  } else {
+    // OUTGOING: Learn from Makler responses
+    try {
+      const learnUrl = `${Deno.env.get("SUPABASE_URL")}/functions/v1/learn-response`;
+      const learnResponse = await fetch(learnUrl, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")}`,
+        },
+        body: JSON.stringify({
+          response_content: messageBody,
+          lead_id: lead.id,
+          user_id: connection.user_id,
+        }),
+      });
+
+      if (learnResponse.ok) {
+        const result = await learnResponse.json();
+        if (result.learned) {
+          console.log("Learned new knowledge:", result.question, "->", result.answer);
+        }
+      }
+    } catch (learnError) {
+      console.error("Error calling learn-response:", learnError);
     }
   }
 }

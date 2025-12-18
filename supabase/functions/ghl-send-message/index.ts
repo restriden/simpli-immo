@@ -151,6 +151,33 @@ serve(async (req: Request) => {
       })
       .eq("id", lead_id);
 
+    // Learn from Makler responses (async, don't block)
+    try {
+      const learnUrl = `${SUPABASE_URL}/functions/v1/learn-response`;
+      fetch(learnUrl, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
+        },
+        body: JSON.stringify({
+          message_id: savedMessage?.id,
+          response_content: message,
+          lead_id: lead_id,
+          user_id: user_id,
+        }),
+      }).then(async (res) => {
+        if (res.ok) {
+          const result = await res.json();
+          if (result.learned) {
+            console.log("Learned from response:", result.question, "->", result.answer);
+          }
+        }
+      }).catch(err => console.error("Learn-response error:", err));
+    } catch (learnError) {
+      console.error("Error triggering learn-response:", learnError);
+    }
+
     return jsonResponse({
       success: true,
       message_id: savedMessage?.id || sendResult.messageId,
