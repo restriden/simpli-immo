@@ -366,14 +366,17 @@ async function handleTask(supabase: any, connection: any, payload: any) {
   }
 
   // Determine type based on task title or type
-  let todoType = "sonstiges";
+  // Allowed values: nachricht, anruf, besichtigung, finanzierung, dokument
+  let todoType = "nachricht"; // Default fallback
   const title = (task.title || task.name || "Aufgabe").toLowerCase();
-  if (title.includes("anruf") || title.includes("call")) {
+  if (title.includes("anruf") || title.includes("call") || title.includes("phone")) {
     todoType = "anruf";
-  } else if (title.includes("besichtigung") || title.includes("termin")) {
+  } else if (title.includes("besichtigung") || title.includes("termin") || title.includes("viewing")) {
     todoType = "besichtigung";
-  } else if (title.includes("finanzierung")) {
+  } else if (title.includes("finanzierung") || title.includes("financing")) {
     todoType = "finanzierung";
+  } else if (title.includes("dokument") || title.includes("document") || title.includes("unterlagen")) {
+    todoType = "dokument";
   } else if (title.includes("nachricht") || title.includes("message")) {
     todoType = "nachricht";
   }
@@ -393,7 +396,6 @@ async function handleTask(supabase: any, connection: any, payload: any) {
     completed: isCompleted,
     due_date: task.dueDate || task.due_date || null,
     ghl_data: payload,
-    updated_at: new Date().toISOString(),
   };
 
   // Check if todo exists
