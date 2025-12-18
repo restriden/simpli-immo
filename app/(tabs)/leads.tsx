@@ -26,17 +26,13 @@ export default function LeadsScreen() {
   const [refreshing, setRefreshing] = useState(false);
 
   const loadLeads = async () => {
-    console.log('[DEBUG] loadLeads called - user?.id:', user?.id);
-
     if (!user?.id) {
-      console.log('[DEBUG] loadLeads: No user.id, returning early');
-      setLoading(false);  // FIX: Set loading to false even when no user
+      setLoading(false);
       return;
     }
 
     try {
       const data = await getLeads(user.id);
-      console.log('[DEBUG] loadLeads: Received data:', data);
       setLeads(data);
     } catch (error) {
       console.error('Error loading leads:', error);
@@ -77,11 +73,19 @@ export default function LeadsScreen() {
     const diffMs = now.getTime() - date.getTime();
     const diffHours = Math.floor(diffMs / (1000 * 60 * 60));
     const diffDays = Math.floor(diffHours / 24);
-    
+
     if (diffHours < 1) return 'gerade eben';
-    if (diffHours < 24) return `vor ${diffHours} Stunden`;
+    if (diffHours < 24) return `vor ${diffHours}h`;
     if (diffDays === 1) return 'gestern';
-    return `vor ${diffDays} Tagen`;
+    return `vor ${diffDays}d`;
+  };
+
+  const handleCall = (phone: string | null | undefined) => {
+    if (!phone) {
+      Alert.alert('Keine Telefonnummer', 'Für diesen Kontakt ist keine Telefonnummer hinterlegt.');
+      return;
+    }
+    Linking.openURL(`tel:${phone}`);
   };
 
   if (loading) {
@@ -103,24 +107,15 @@ export default function LeadsScreen() {
         </TouchableOpacity>
       </View>
 
-      <ScrollView 
-        style={styles.scrollView} 
-        contentContainerStyle={styles.scrollContent} 
+      <ScrollView
+        style={styles.scrollView}
+        contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
         refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
+          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#F97316" />
         }
       >
-        <View style={styles.protectionBanner}>
-          <View style={styles.protectionIcon}>
-            <Feather name="shield" size={20} color="#F97316" />
-          </View>
-          <View style={styles.protectionContent}>
-            <Text style={styles.protectionTitle}>Lead-Schutz aktiv</Text>
-            <Text style={styles.protectionSubtitle}>Alle Simpli-Leads sind 18 Monate geschützt</Text>
-          </View>
-        </View>
-
+        {/* Filter Tabs */}
         <View style={styles.filterContainer}>
           {['alle', 'simpli', 'extern'].map((f) => (
             <TouchableOpacity
@@ -136,6 +131,7 @@ export default function LeadsScreen() {
           ))}
         </View>
 
+        {/* Empty State */}
         {filteredLeads.length === 0 && (
           <View style={styles.emptyState}>
             <View style={styles.emptyIcon}>
@@ -148,77 +144,64 @@ export default function LeadsScreen() {
           </View>
         )}
 
+        {/* Lead Cards */}
         {filteredLeads.map(lead => {
           const status = statusLabels[lead.status] || statusLabels.neu;
 
-          const handleCall = () => {
-            if (!lead.phone) {
-              Alert.alert('Keine Telefonnummer', 'Für diesen Kontakt ist keine Telefonnummer hinterlegt.');
-              return;
-            }
-            Linking.openURL(`tel:${lead.phone}`);
-          };
-
-          const handleWhatsApp = () => {
-            if (!lead.phone) {
-              Alert.alert('Keine Telefonnummer', 'Für diesen Kontakt ist keine Telefonnummer hinterlegt.');
-              return;
-            }
-            const phone = lead.phone.replace(/\D/g, '');
-            Linking.openURL(`whatsapp://send?phone=${phone}`);
-          };
-
           return (
-            <View key={lead.id} style={styles.leadCard}>
-              <TouchableOpacity
-                style={styles.leadMainContent}
-                onPress={() => router.push(`/lead/${lead.id}`)}
-                activeOpacity={0.7}
-              >
-                <View style={styles.leadAvatar}>
-                  <Text style={styles.leadAvatarText}>
-                    {lead.name.split(' ').map(n => n[0]).join('').toUpperCase()}
-                  </Text>
-                </View>
+            <TouchableOpacity
+              key={lead.id}
+              style={styles.leadCard}
+              onPress={() => router.push(`/lead/${lead.id}`)}
+              activeOpacity={0.7}
+            >
+              {/* Left: Avatar */}
+              <View style={styles.leadAvatar}>
+                <Text style={styles.leadAvatarText}>
+                  {lead.name.split(' ').map(n => n[0]).join('').substring(0, 2).toUpperCase()}
+                </Text>
+              </View>
 
-                <View style={styles.leadContent}>
-                  <View style={styles.leadHeader}>
-                    <Text style={styles.leadName}>{lead.name}</Text>
-                    {lead.source === 'simpli' && (
-                      <View style={styles.simpliBadge}>
-                        <Feather name="zap" size={10} color="#F97316" />
-                      </View>
-                    )}
-                  </View>
-                  {lead.objekt && (
-                    <Text style={styles.leadObjekt}>
-                      <Feather name="home" size={12} color="#9CA3AF" /> {lead.objekt.name}
-                    </Text>
-                  )}
-                  <View style={styles.leadFooter}>
-                    <View style={[styles.statusBadge, { backgroundColor: status.bg }]}>
-                      <Text style={[styles.statusText, { color: status.color }]}>{status.label}</Text>
+              {/* Middle: Info */}
+              <View style={styles.leadInfo}>
+                <View style={styles.leadNameRow}>
+                  <Text style={styles.leadName} numberOfLines={1}>{lead.name}</Text>
+                  {lead.source === 'simpli' && (
+                    <View style={styles.simpliBadge}>
+                      <Feather name="zap" size={10} color="#F97316" />
                     </View>
-                    <Text style={styles.leadTime}>{formatTimeAgo(lead.updated_at)}</Text>
-                  </View>
+                  )}
                 </View>
-              </TouchableOpacity>
+                <View style={styles.leadMeta}>
+                  <View style={[styles.statusBadge, { backgroundColor: status.bg }]}>
+                    <Text style={[styles.statusText, { color: status.color }]}>{status.label}</Text>
+                  </View>
+                  <Text style={styles.leadTime}>{formatTimeAgo(lead.updated_at)}</Text>
+                </View>
+              </View>
 
+              {/* Right: Actions */}
               <View style={styles.leadActions}>
-                <TouchableOpacity style={styles.actionBtn} onPress={handleCall}>
-                  <Feather name="phone" size={18} color="#22C55E" />
-                </TouchableOpacity>
-                <TouchableOpacity style={styles.actionBtn} onPress={handleWhatsApp}>
-                  <Feather name="message-circle" size={18} color="#25D366" />
+                <TouchableOpacity
+                  style={styles.actionBtn}
+                  onPress={(e) => {
+                    e.stopPropagation();
+                    handleCall(lead.phone);
+                  }}
+                >
+                  <Feather name="phone" size={16} color="#22C55E" />
                 </TouchableOpacity>
                 <TouchableOpacity
-                  style={styles.actionBtnArrow}
-                  onPress={() => router.push(`/lead/${lead.id}`)}
+                  style={styles.actionBtn}
+                  onPress={(e) => {
+                    e.stopPropagation();
+                    router.push(`/chat/${lead.id}`);
+                  }}
                 >
-                  <Feather name="chevron-right" size={20} color="#9CA3AF" />
+                  <Feather name="message-circle" size={16} color="#F97316" />
                 </TouchableOpacity>
               </View>
-            </View>
+            </TouchableOpacity>
           );
         })}
 
@@ -229,73 +212,173 @@ export default function LeadsScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#FFFFFF' },
-  loadingContainer: { flex: 1, justifyContent: 'center', alignItems: 'center' },
-  header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 20, paddingVertical: 16 },
-  title: { fontSize: 28, fontFamily: 'DMSans-Bold', color: '#111827' },
-  searchButton: { width: 44, height: 44, borderRadius: 12, backgroundColor: '#F9FAFB', justifyContent: 'center', alignItems: 'center' },
-  scrollView: { flex: 1 },
-  scrollContent: { paddingHorizontal: 20 },
-  protectionBanner: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#FFF7ED', borderRadius: 12, padding: 14, marginBottom: 20, borderWidth: 1, borderColor: '#FFEDD5' },
-  protectionIcon: { width: 40, height: 40, borderRadius: 10, backgroundColor: '#FFFFFF', justifyContent: 'center', alignItems: 'center' },
-  protectionContent: { flex: 1, marginLeft: 12 },
-  protectionTitle: { fontSize: 14, fontFamily: 'DMSans-SemiBold', color: '#111827' },
-  protectionSubtitle: { fontSize: 12, fontFamily: 'DMSans-Regular', color: '#6B7280', marginTop: 1 },
-  filterContainer: { flexDirection: 'row', gap: 8, marginBottom: 20 },
-  filterTab: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 14, paddingVertical: 8, borderRadius: 20, backgroundColor: '#F3F4F6' },
-  filterTabActive: { backgroundColor: '#FFF7ED' },
-  filterText: { fontSize: 13, fontFamily: 'DMSans-Medium', color: '#6B7280' },
-  filterTextActive: { color: '#F97316' },
-  emptyState: { alignItems: 'center', paddingVertical: 60 },
-  emptyIcon: { width: 80, height: 80, borderRadius: 20, backgroundColor: '#F3F4F6', justifyContent: 'center', alignItems: 'center', marginBottom: 16 },
-  emptyTitle: { fontSize: 18, fontFamily: 'DMSans-SemiBold', color: '#111827', marginBottom: 4 },
-  emptyText: { fontSize: 14, fontFamily: 'DMSans-Regular', color: '#6B7280', textAlign: 'center' },
-  leadCard: {
+  container: {
+    flex: 1,
+    backgroundColor: '#F9FAFB'
+  },
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center'
+  },
+  header: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: 20,
+    paddingVertical: 16,
     backgroundColor: '#FFFFFF',
-    borderRadius: 16,
-    padding: 14,
-    marginBottom: 12,
-    borderWidth: 1,
-    borderColor: '#F3F4F6',
+    borderBottomWidth: 1,
+    borderBottomColor: '#F3F4F6',
   },
-  leadMainContent: {
-    flexDirection: 'row',
-    alignItems: 'center',
+  title: {
+    fontSize: 24,
+    fontFamily: 'DMSans-Bold',
+    color: '#111827'
   },
-  leadAvatar: { width: 48, height: 48, borderRadius: 14, backgroundColor: '#F3F4F6', justifyContent: 'center', alignItems: 'center' },
-  leadAvatarText: { fontSize: 16, fontFamily: 'DMSans-SemiBold', color: '#6B7280' },
-  leadContent: { flex: 1, marginLeft: 12 },
-  leadHeader: { flexDirection: 'row', alignItems: 'center', gap: 6 },
-  leadName: { fontSize: 15, fontFamily: 'DMSans-SemiBold', color: '#111827' },
-  simpliBadge: { width: 20, height: 20, borderRadius: 5, backgroundColor: '#FFF7ED', justifyContent: 'center', alignItems: 'center' },
-  leadObjekt: { fontSize: 13, fontFamily: 'DMSans-Regular', color: '#6B7280', marginTop: 2 },
-  leadFooter: { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 6 },
-  statusBadge: { paddingHorizontal: 8, paddingVertical: 3, borderRadius: 6 },
-  statusText: { fontSize: 11, fontFamily: 'DMSans-SemiBold' },
-  leadTime: { fontSize: 11, fontFamily: 'DMSans-Regular', color: '#9CA3AF' },
-  leadActions: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'flex-end',
-    gap: 8,
-    marginTop: 12,
-    paddingTop: 12,
-    borderTopWidth: 1,
-    borderTopColor: '#F3F4F6',
-  },
-  actionBtn: {
+  searchButton: {
     width: 40,
     height: 40,
+    borderRadius: 10,
+    backgroundColor: '#F3F4F6',
+    justifyContent: 'center',
+    alignItems: 'center'
+  },
+  scrollView: {
+    flex: 1
+  },
+  scrollContent: {
+    paddingHorizontal: 16,
+    paddingTop: 16,
+  },
+  filterContainer: {
+    flexDirection: 'row',
+    gap: 8,
+    marginBottom: 16
+  },
+  filterTab: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 16,
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+  },
+  filterTabActive: {
+    backgroundColor: '#FFF7ED',
+    borderColor: '#F97316',
+  },
+  filterText: {
+    fontSize: 13,
+    fontFamily: 'DMSans-Medium',
+    color: '#6B7280'
+  },
+  filterTextActive: {
+    color: '#F97316'
+  },
+  emptyState: {
+    alignItems: 'center',
+    paddingVertical: 60
+  },
+  emptyIcon: {
+    width: 80,
+    height: 80,
+    borderRadius: 20,
+    backgroundColor: '#FFFFFF',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 16
+  },
+  emptyTitle: {
+    fontSize: 18,
+    fontFamily: 'DMSans-SemiBold',
+    color: '#111827',
+    marginBottom: 4
+  },
+  emptyText: {
+    fontSize: 14,
+    fontFamily: 'DMSans-Regular',
+    color: '#6B7280',
+    textAlign: 'center'
+  },
+  leadCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#FFFFFF',
+    borderRadius: 12,
+    padding: 12,
+    marginBottom: 8,
+  },
+  leadAvatar: {
+    width: 44,
+    height: 44,
     borderRadius: 12,
     backgroundColor: '#F3F4F6',
     justifyContent: 'center',
-    alignItems: 'center',
+    alignItems: 'center'
   },
-  actionBtnArrow: {
-    width: 40,
-    height: 40,
+  leadAvatarText: {
+    fontSize: 14,
+    fontFamily: 'DMSans-SemiBold',
+    color: '#6B7280'
+  },
+  leadInfo: {
+    flex: 1,
+    marginLeft: 12,
+    marginRight: 8,
+  },
+  leadNameRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginBottom: 4,
+  },
+  leadName: {
+    fontSize: 15,
+    fontFamily: 'DMSans-SemiBold',
+    color: '#111827',
+    flexShrink: 1,
+  },
+  simpliBadge: {
+    width: 18,
+    height: 18,
+    borderRadius: 4,
+    backgroundColor: '#FFF7ED',
+    justifyContent: 'center',
+    alignItems: 'center'
+  },
+  leadMeta: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  statusBadge: {
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 4
+  },
+  statusText: {
+    fontSize: 10,
+    fontFamily: 'DMSans-SemiBold'
+  },
+  leadTime: {
+    fontSize: 11,
+    fontFamily: 'DMSans-Regular',
+    color: '#9CA3AF'
+  },
+  leadActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  actionBtn: {
+    width: 36,
+    height: 36,
+    borderRadius: 10,
+    backgroundColor: '#F3F4F6',
     justifyContent: 'center',
     alignItems: 'center',
-    marginLeft: 4,
   },
 });
