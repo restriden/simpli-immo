@@ -11,6 +11,7 @@ import {
   syncGHLData,
   formatLastSync,
   debugGHLConnections,
+  registerGHLWebhooks,
   GHLConnection
 } from '../../lib/ghl';
 
@@ -23,6 +24,7 @@ export default function ProfilScreen() {
   const [ghlLoading, setGhlLoading] = useState(false);
   const [ghlConnecting, setGhlConnecting] = useState(false);
   const [ghlSyncing, setGhlSyncing] = useState(false);
+  const [ghlRegisteringWebhooks, setGhlRegisteringWebhooks] = useState(false);
 
   // Load GHL connection status
   const loadGHLStatus = async () => {
@@ -145,6 +147,33 @@ export default function ProfilScreen() {
     }
   };
 
+  // Handle GHL Webhook Registration
+  const handleRegisterWebhooks = async () => {
+    if (!user?.id) return;
+
+    setGhlRegisteringWebhooks(true);
+    try {
+      const result = await registerGHLWebhooks(user.id);
+
+      if (result.success) {
+        Alert.alert(
+          'Webhooks registriert',
+          `${result.webhooksRegistered} Webhooks erfolgreich registriert.\n\nEingehende Nachrichten werden jetzt automatisch synchronisiert.`
+        );
+      } else {
+        Alert.alert(
+          'Fehler',
+          `Webhook-Registrierung fehlgeschlagen:\n${result.errors.join('\n')}`
+        );
+      }
+    } catch (error) {
+      console.error('Webhook registration error:', error);
+      Alert.alert('Fehler', 'Webhook-Registrierung fehlgeschlagen');
+    } finally {
+      setGhlRegisteringWebhooks(false);
+    }
+  };
+
   const handleSignOut = () => {
     Alert.alert('Abmelden', 'Möchtest du dich wirklich abmelden?', [
       { text: 'Abbrechen', style: 'cancel' },
@@ -242,11 +271,25 @@ export default function ProfilScreen() {
                 </TouchableOpacity>
 
                 <TouchableOpacity
+                  style={styles.ghlWebhookButton}
+                  onPress={handleRegisterWebhooks}
+                  disabled={ghlRegisteringWebhooks}
+                >
+                  {ghlRegisteringWebhooks ? (
+                    <ActivityIndicator size="small" color="#3B82F6" />
+                  ) : (
+                    <>
+                      <Feather name="radio" size={16} color="#3B82F6" />
+                      <Text style={styles.ghlWebhookButtonText}>Webhooks</Text>
+                    </>
+                  )}
+                </TouchableOpacity>
+
+                <TouchableOpacity
                   style={styles.ghlDisconnectButton}
                   onPress={handleGHLDisconnect}
                 >
                   <Feather name="x" size={16} color="#EF4444" />
-                  <Text style={styles.ghlDisconnectButtonText}>Trennen</Text>
                 </TouchableOpacity>
               </View>
             </View>
@@ -394,7 +437,9 @@ const styles = StyleSheet.create({
   ghlActions: { flexDirection: 'row', gap: 10, marginTop: 14, paddingTop: 14, borderTopWidth: 1, borderTopColor: '#F3F4F6' },
   ghlSyncButton: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, backgroundColor: '#F97316', paddingVertical: 10, borderRadius: 10 },
   ghlSyncButtonText: { fontSize: 14, fontFamily: 'DMSans-SemiBold', color: '#FFFFFF' },
-  ghlDisconnectButton: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, backgroundColor: '#FEE2E2', paddingVertical: 10, paddingHorizontal: 16, borderRadius: 10 },
+  ghlWebhookButton: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, backgroundColor: '#DBEAFE', paddingVertical: 10, borderRadius: 10 },
+  ghlWebhookButtonText: { fontSize: 14, fontFamily: 'DMSans-SemiBold', color: '#3B82F6' },
+  ghlDisconnectButton: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', backgroundColor: '#FEE2E2', paddingVertical: 10, paddingHorizontal: 12, borderRadius: 10 },
   ghlDisconnectButtonText: { fontSize: 14, fontFamily: 'DMSans-SemiBold', color: '#EF4444' },
 
   ghlConnectCard: { backgroundColor: '#FFFFFF', borderRadius: 16, padding: 16, borderWidth: 1, borderColor: '#F3F4F6' },

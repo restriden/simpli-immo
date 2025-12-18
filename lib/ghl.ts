@@ -448,3 +448,53 @@ export function formatLastSync(lastSyncAt: string | null): string {
     return `Vor ${diffDays} Tagen`;
   }
 }
+
+/**
+ * Register webhooks for existing GHL connection
+ * Call this for users who connected before automatic webhook registration was added
+ */
+export async function registerGHLWebhooks(userId: string): Promise<{
+  success: boolean;
+  webhooksRegistered: number;
+  errors: string[];
+}> {
+  try {
+    const { data: { session } } = await supabase.auth.getSession();
+
+    if (!session?.access_token) {
+      return { success: false, webhooksRegistered: 0, errors: ['Not authenticated'] };
+    }
+
+    const response = await fetch(`${SUPABASE_FUNCTIONS_URL}/ghl-register-webhooks`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${session.access_token}`,
+      },
+      body: JSON.stringify({ user_id: userId }),
+    });
+
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}));
+      return {
+        success: false,
+        webhooksRegistered: 0,
+        errors: [errorData.error || `HTTP ${response.status}`],
+      };
+    }
+
+    const result = await response.json();
+    return {
+      success: result.success,
+      webhooksRegistered: result.webhooks_registered || 0,
+      errors: result.errors || [],
+    };
+  } catch (error) {
+    console.error('[GHL] Register webhooks error:', error);
+    return {
+      success: false,
+      webhooksRegistered: 0,
+      errors: [error instanceof Error ? error.message : 'Unknown error'],
+    };
+  }
+}
