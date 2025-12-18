@@ -12,7 +12,8 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useFocusEffect } from 'expo-router';
 import { Feather } from '@expo/vector-icons';
 import { useAuth } from '../../lib/auth';
-import { getTodos, completeTodo, getDashboardStats, Todo } from '../../lib/database';
+import { getTodos, getDashboardStats, Todo } from '../../lib/database';
+import { completeGHLTask, subscribeToTodos } from '../../lib/ghl';
 
 const todoIcons: Record<string, { icon: string; color: string }> = {
   nachricht: { icon: 'message-circle', color: '#EF4444' },
@@ -69,6 +70,46 @@ export default function HomeScreen() {
     loadData();
   }, [user?.id]);
 
+  // Realtime subscription for todos
+  useEffect(() => {
+    if (!user?.id) return;
+
+    console.log('[DASHBOARD] Setting up realtime subscription for todos');
+    const unsubscribe = subscribeToTodos(user.id, (todo, eventType) => {
+      console.log('[DASHBOARD] Todo event:', eventType, todo?.id);
+
+      if (eventType === 'INSERT') {
+        setTodos(prev => {
+          // Avoid duplicates
+          if (prev.some(t => t.id === todo.id)) return prev;
+          // Add new todo if not completed
+          if (!todo.completed) {
+            return [todo, ...prev];
+          }
+          return prev;
+        });
+        setStats(prev => ({ ...prev, openTodos: prev.openTodos + 1 }));
+      } else if (eventType === 'UPDATE') {
+        if (todo.completed) {
+          // Remove completed todo
+          setTodos(prev => prev.filter(t => t.id !== todo.id));
+          setStats(prev => ({ ...prev, openTodos: Math.max(0, prev.openTodos - 1) }));
+        } else {
+          // Update existing todo
+          setTodos(prev => prev.map(t => t.id === todo.id ? { ...t, ...todo } : t));
+        }
+      } else if (eventType === 'DELETE') {
+        setTodos(prev => prev.filter(t => t.id !== todo.id));
+        setStats(prev => ({ ...prev, openTodos: Math.max(0, prev.openTodos - 1) }));
+      }
+    });
+
+    return () => {
+      console.log('[DASHBOARD] Cleaning up realtime subscription');
+      unsubscribe();
+    };
+  }, [user?.id]);
+
   useFocusEffect(
     useCallback(() => {
       loadData();
@@ -82,13 +123,22 @@ export default function HomeScreen() {
   };
 
   const toggleTodo = async (todoId: string) => {
+    if (!user?.id) return;
+
     if (completedTodos.includes(todoId)) {
       setCompletedTodos(prev => prev.filter(id => id !== todoId));
     } else {
       setCompletedTodos(prev => [...prev, todoId]);
+
+      // Complete after animation delay
       setTimeout(async () => {
-        await completeTodo(todoId);
-        setTodos(prev => prev.filter(t => t.id !== todoId));
+        const result = await completeGHLTask(user.id, todoId, true);
+        console.log('[DASHBOARD] Complete task result:', result);
+
+        if (result.success) {
+          setTodos(prev => prev.filter(t => t.id !== todoId));
+          setStats(prev => ({ ...prev, openTodos: Math.max(0, prev.openTodos - 1) }));
+        }
         setCompletedTodos(prev => prev.filter(id => id !== todoId));
       }, 1500);
     }

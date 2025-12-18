@@ -450,6 +450,90 @@ export function formatLastSync(lastSyncAt: string | null): string {
 }
 
 /**
+ * Complete a task and sync with GHL
+ */
+export async function completeGHLTask(
+  userId: string,
+  todoId: string,
+  completed: boolean = true
+): Promise<{ success: boolean; syncedToGhl: boolean; error?: string }> {
+  try {
+    const { data: { session } } = await supabase.auth.getSession();
+
+    if (!session?.access_token) {
+      return { success: false, syncedToGhl: false, error: 'Not authenticated' };
+    }
+
+    const response = await fetch(`${SUPABASE_FUNCTIONS_URL}/ghl-complete-task`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${session.access_token}`,
+      },
+      body: JSON.stringify({
+        user_id: userId,
+        todo_id: todoId,
+        completed,
+      }),
+    });
+
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}));
+      return {
+        success: false,
+        syncedToGhl: false,
+        error: errorData.error || `HTTP ${response.status}`,
+      };
+    }
+
+    const result = await response.json();
+    return {
+      success: result.success,
+      syncedToGhl: result.synced_to_ghl || false,
+    };
+  } catch (error) {
+    console.error('[GHL] Complete task error:', error);
+    return {
+      success: false,
+      syncedToGhl: false,
+      error: error instanceof Error ? error.message : 'Unknown error',
+    };
+  }
+}
+
+/**
+ * Subscribe to real-time todo updates for a user
+ */
+export function subscribeToTodos(
+  userId: string,
+  onTodo: (todo: any, eventType: 'INSERT' | 'UPDATE' | 'DELETE') => void
+): () => void {
+  console.log('[GHL] Subscribing to todos for user:', userId);
+
+  const channel = supabase
+    .channel(`todos:${userId}`)
+    .on(
+      'postgres_changes',
+      {
+        event: '*',
+        schema: 'public',
+        table: 'todos',
+        filter: `user_id=eq.${userId}`,
+      },
+      (payload) => {
+        console.log('[GHL] Todo change received:', payload.eventType, payload.new || payload.old);
+        onTodo(payload.new || payload.old, payload.eventType as any);
+      }
+    )
+    .subscribe();
+
+  return () => {
+    console.log('[GHL] Unsubscribing from todos');
+    supabase.removeChannel(channel);
+  };
+}
+
+/**
  * Register webhooks for existing GHL connection
  * Call this for users who connected before automatic webhook registration was added
  */

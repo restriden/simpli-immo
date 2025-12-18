@@ -83,6 +83,13 @@ serve(async (req: Request) => {
         await handleAppointment(supabase, connection, payload);
         break;
 
+      case "TaskCreate":
+      case "TaskUpdate":
+      case "TaskComplete":
+      case "TaskDelete":
+        await handleTask(supabase, connection, payload);
+        break;
+
       default:
         console.log("Unhandled webhook type:", type);
     }
@@ -308,6 +315,118 @@ async function handleAppointment(supabase: any, connection: any, payload: any) {
 
     if (error) {
       console.error("Error creating todo:", error);
+    }
+  }
+}
+
+async function handleTask(supabase: any, connection: any, payload: any) {
+  console.log("=== HANDLING TASK ===");
+  console.log("Full payload:", JSON.stringify(payload, null, 2));
+
+  const task = payload.task || payload;
+  const taskId = task.id || payload.taskId;
+
+  if (!taskId) {
+    console.error("No task ID in payload");
+    return;
+  }
+
+  // Handle task deletion
+  if (payload.type === "TaskDelete") {
+    const { error } = await supabase
+      .from("todos")
+      .delete()
+      .eq("ghl_task_id", taskId);
+
+    if (error) {
+      console.error("Error deleting todo:", error);
+    } else {
+      console.log("Todo deleted for task:", taskId);
+    }
+    return;
+  }
+
+  // Find lead if contact is associated
+  let leadId = null;
+  const contactId = task.contactId || task.contact_id || payload.contactId;
+  if (contactId) {
+    const { data: lead } = await supabase
+      .from("leads")
+      .select("id")
+      .eq("ghl_contact_id", contactId)
+      .eq("user_id", connection.user_id)
+      .single();
+    leadId = lead?.id;
+  }
+
+  // Determine priority based on task data
+  let priority = "normal";
+  if (task.priority === "high" || task.priority === "urgent") {
+    priority = "dringend";
+  }
+
+  // Determine type based on task title or type
+  let todoType = "sonstiges";
+  const title = (task.title || task.name || "Aufgabe").toLowerCase();
+  if (title.includes("anruf") || title.includes("call")) {
+    todoType = "anruf";
+  } else if (title.includes("besichtigung") || title.includes("termin")) {
+    todoType = "besichtigung";
+  } else if (title.includes("finanzierung")) {
+    todoType = "finanzierung";
+  } else if (title.includes("nachricht") || title.includes("message")) {
+    todoType = "nachricht";
+  }
+
+  const isCompleted = payload.type === "TaskComplete" ||
+                      task.status === "completed" ||
+                      task.completed === true;
+
+  const todoData = {
+    user_id: connection.user_id,
+    lead_id: leadId,
+    ghl_task_id: taskId,
+    type: todoType,
+    priority: priority,
+    title: task.title || task.name || "Aufgabe",
+    subtitle: task.description || task.body || task.notes || null,
+    completed: isCompleted,
+    due_date: task.dueDate || task.due_date || null,
+    ghl_data: payload,
+    updated_at: new Date().toISOString(),
+  };
+
+  // Check if todo exists
+  const { data: existing } = await supabase
+    .from("todos")
+    .select("id")
+    .eq("ghl_task_id", taskId)
+    .single();
+
+  if (existing) {
+    // Update existing todo
+    const { error } = await supabase
+      .from("todos")
+      .update(todoData)
+      .eq("id", existing.id);
+
+    if (error) {
+      console.error("Error updating todo:", error);
+    } else {
+      console.log("Todo updated:", existing.id);
+    }
+  } else if (!isCompleted) {
+    // Only create new todo if not already completed
+    const { data: newTodo, error } = await supabase
+      .from("todos")
+      .insert(todoData)
+      .select()
+      .single();
+
+    if (error) {
+      console.error("Error creating todo:", error);
+    } else {
+      console.log("Todo created:", newTodo?.id);
     }
   }
 }
