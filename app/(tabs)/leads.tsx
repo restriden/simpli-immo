@@ -1,27 +1,41 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { View, Text, ScrollView, TouchableOpacity, StyleSheet, RefreshControl, ActivityIndicator, Linking, Alert } from 'react-native';
+import { View, Text, ScrollView, TouchableOpacity, StyleSheet, RefreshControl, ActivityIndicator, Linking, Alert, Modal } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useFocusEffect } from 'expo-router';
 import { Feather } from '@expo/vector-icons';
 import { useAuth } from '../../lib/auth';
 import { getLeads, Lead } from '../../lib/database';
+import { supabase } from '../../lib/supabase';
+
+interface Objekt {
+  id: string;
+  name: string;
+}
 
 const statusLabels: Record<string, { label: string; color: string; bg: string }> = {
   neu: { label: 'Neu', color: '#3B82F6', bg: '#DBEAFE' },
   kontaktiert: { label: 'Kontaktiert', color: '#6B7280', bg: '#F3F4F6' },
   simpli_gesendet: { label: 'Simpli gesendet', color: '#F97316', bg: '#FFF7ED' },
-  simpli_bestaetigt: { label: 'Finanziert', color: '#22C55E', bg: '#D1FAE5' },
+  simpli_bestaetigt: { label: 'Simpli Finance', color: '#22C55E', bg: '#D1FAE5' },
   extern_finanziert: { label: 'Extern fin.', color: '#8B5CF6', bg: '#EDE9FE' },
   besichtigt: { label: 'Besichtigt', color: '#3B82F6', bg: '#DBEAFE' },
   abgesagt: { label: 'Abgesagt', color: '#EF4444', bg: '#FEE2E2' },
   gekauft: { label: 'Käufer', color: '#22C55E', bg: '#D1FAE5' },
 };
 
+type FilterType = 'alle' | 'objekt' | 'finanzierung';
+type FinanzierungFilter = 'alle' | 'simpli' | 'extern';
+
 export default function LeadsScreen() {
   const { user } = useAuth();
   const router = useRouter();
-  const [filter, setFilter] = useState<'alle' | 'simpli' | 'extern'>('alle');
+  const [activeFilter, setActiveFilter] = useState<FilterType>('alle');
+  const [selectedObjekt, setSelectedObjekt] = useState<string | null>(null);
+  const [finanzierungFilter, setFinanzierungFilter] = useState<FinanzierungFilter>('alle');
+  const [showObjektModal, setShowObjektModal] = useState(false);
+  const [showFinanzierungModal, setShowFinanzierungModal] = useState(false);
   const [leads, setLeads] = useState<Lead[]>([]);
+  const [objekte, setObjekte] = useState<Objekt[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
 
@@ -33,7 +47,11 @@ export default function LeadsScreen() {
 
     try {
       const data = await getLeads(user.id);
-      setLeads(data);
+      // Sort by updated_at descending (newest first)
+      const sorted = data.sort((a, b) =>
+        new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime()
+      );
+      setLeads(sorted);
     } catch (error) {
       console.error('Error loading leads:', error);
     } finally {
@@ -41,8 +59,27 @@ export default function LeadsScreen() {
     }
   };
 
+  const loadObjekte = async () => {
+    if (!user?.id) return;
+
+    try {
+      const { data, error } = await supabase
+        .from('objekte')
+        .select('id, name')
+        .eq('user_id', user.id)
+        .order('name');
+
+      if (!error && data) {
+        setObjekte(data);
+      }
+    } catch (error) {
+      console.error('Error loading objekte:', error);
+    }
+  };
+
   useEffect(() => {
     loadLeads();
+    loadObjekte();
   }, [user?.id]);
 
   useFocusEffect(
@@ -57,15 +94,24 @@ export default function LeadsScreen() {
     setRefreshing(false);
   };
 
+  // Apply filters
   const filteredLeads = leads.filter(lead => {
-    if (filter === 'alle') return true;
-    return lead.source === filter;
-  });
+    // Objekt filter
+    if (activeFilter === 'objekt' && selectedObjekt) {
+      if (lead.objekt_id !== selectedObjekt) return false;
+    }
 
-  const getLeadCounts = (source: string) => {
-    if (source === 'alle') return leads.length;
-    return leads.filter(l => l.source === source).length;
-  };
+    // Finanzierung filter
+    if (activeFilter === 'finanzierung' && finanzierungFilter !== 'alle') {
+      if (finanzierungFilter === 'simpli') {
+        if (lead.status !== 'simpli_bestaetigt') return false;
+      } else if (finanzierungFilter === 'extern') {
+        if (lead.status !== 'extern_finanziert') return false;
+      }
+    }
+
+    return true;
+  });
 
   const formatTimeAgo = (dateString: string) => {
     const date = new Date(dateString);
@@ -88,6 +134,18 @@ export default function LeadsScreen() {
     Linking.openURL(`tel:${phone}`);
   };
 
+  const getSelectedObjektName = () => {
+    if (!selectedObjekt) return 'Objekt';
+    const obj = objekte.find(o => o.id === selectedObjekt);
+    return obj?.name || 'Objekt';
+  };
+
+  const getFinanzierungLabel = () => {
+    if (finanzierungFilter === 'alle') return 'Finanzierung';
+    if (finanzierungFilter === 'simpli') return 'Simpli Finance';
+    return 'Extern fin.';
+  };
+
   if (loading) {
     return (
       <SafeAreaView style={styles.container} edges={['top']}>
@@ -102,8 +160,63 @@ export default function LeadsScreen() {
     <SafeAreaView style={styles.container} edges={['top']}>
       <View style={styles.header}>
         <Text style={styles.title}>Leads</Text>
-        <TouchableOpacity style={styles.searchButton}>
-          <Feather name="search" size={22} color="#6B7280" />
+        <View style={styles.headerRight}>
+          <Text style={styles.leadCount}>{filteredLeads.length}</Text>
+          <TouchableOpacity style={styles.searchButton}>
+            <Feather name="search" size={20} color="#6B7280" />
+          </TouchableOpacity>
+        </View>
+      </View>
+
+      {/* Filter Bar */}
+      <View style={styles.filterBar}>
+        {/* Filter: Alle */}
+        <TouchableOpacity
+          style={[styles.filterChip, activeFilter === 'alle' && styles.filterChipActive]}
+          onPress={() => {
+            setActiveFilter('alle');
+            setSelectedObjekt(null);
+            setFinanzierungFilter('alle');
+          }}
+        >
+          <Text style={[styles.filterChipText, activeFilter === 'alle' && styles.filterChipTextActive]}>
+            Alle ({leads.length})
+          </Text>
+        </TouchableOpacity>
+
+        {/* Filter: Objekt (Dropdown) */}
+        <TouchableOpacity
+          style={[styles.filterChip, activeFilter === 'objekt' && styles.filterChipActive]}
+          onPress={() => setShowObjektModal(true)}
+        >
+          <Text
+            style={[styles.filterChipText, activeFilter === 'objekt' && styles.filterChipTextActive]}
+            numberOfLines={1}
+          >
+            {activeFilter === 'objekt' && selectedObjekt ? getSelectedObjektName() : 'Objekt'}
+          </Text>
+          <Feather
+            name="chevron-down"
+            size={14}
+            color={activeFilter === 'objekt' ? '#F97316' : '#6B7280'}
+            style={{ marginLeft: 4 }}
+          />
+        </TouchableOpacity>
+
+        {/* Filter: Finanzierung (Dropdown) */}
+        <TouchableOpacity
+          style={[styles.filterChip, activeFilter === 'finanzierung' && styles.filterChipActive]}
+          onPress={() => setShowFinanzierungModal(true)}
+        >
+          <Text style={[styles.filterChipText, activeFilter === 'finanzierung' && styles.filterChipTextActive]}>
+            {activeFilter === 'finanzierung' ? getFinanzierungLabel() : 'Finanzierung'}
+          </Text>
+          <Feather
+            name="chevron-down"
+            size={14}
+            color={activeFilter === 'finanzierung' ? '#F97316' : '#6B7280'}
+            style={{ marginLeft: 4 }}
+          />
         </TouchableOpacity>
       </View>
 
@@ -115,31 +228,17 @@ export default function LeadsScreen() {
           <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#F97316" />
         }
       >
-        {/* Filter Tabs */}
-        <View style={styles.filterContainer}>
-          {['alle', 'simpli', 'extern'].map((f) => (
-            <TouchableOpacity
-              key={f}
-              style={[styles.filterTab, filter === f && styles.filterTabActive]}
-              onPress={() => setFilter(f as any)}
-            >
-              {f === 'simpli' && <Feather name="zap" size={14} color={filter === f ? '#F97316' : '#6B7280'} style={{ marginRight: 4 }} />}
-              <Text style={[styles.filterText, filter === f && styles.filterTextActive]}>
-                {f.charAt(0).toUpperCase() + f.slice(1)} ({getLeadCounts(f)})
-              </Text>
-            </TouchableOpacity>
-          ))}
-        </View>
-
         {/* Empty State */}
         {filteredLeads.length === 0 && (
           <View style={styles.emptyState}>
             <View style={styles.emptyIcon}>
               <Feather name="users" size={48} color="#D1D5DB" />
             </View>
-            <Text style={styles.emptyTitle}>Noch keine Leads</Text>
+            <Text style={styles.emptyTitle}>Keine Leads gefunden</Text>
             <Text style={styles.emptyText}>
-              Leads werden hier erscheinen, sobald sich Interessenten melden.
+              {activeFilter !== 'alle'
+                ? 'Versuche einen anderen Filter.'
+                : 'Leads werden hier erscheinen, sobald sich Interessenten melden.'}
             </Text>
           </View>
         )}
@@ -207,6 +306,129 @@ export default function LeadsScreen() {
 
         <View style={{ height: 100 }} />
       </ScrollView>
+
+      {/* Objekt Selection Modal */}
+      <Modal
+        visible={showObjektModal}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setShowObjektModal(false)}
+      >
+        <TouchableOpacity
+          style={styles.modalOverlay}
+          activeOpacity={1}
+          onPress={() => setShowObjektModal(false)}
+        >
+          <View style={styles.modalContent}>
+            <Text style={styles.modalTitle}>Nach Objekt filtern</Text>
+
+            <TouchableOpacity
+              style={[styles.modalOption, !selectedObjekt && activeFilter === 'objekt' && styles.modalOptionActive]}
+              onPress={() => {
+                setActiveFilter('objekt');
+                setSelectedObjekt(null);
+                setShowObjektModal(false);
+              }}
+            >
+              <Text style={styles.modalOptionText}>Alle Objekte</Text>
+              {!selectedObjekt && activeFilter === 'objekt' && (
+                <Feather name="check" size={18} color="#F97316" />
+              )}
+            </TouchableOpacity>
+
+            {objekte.map(obj => (
+              <TouchableOpacity
+                key={obj.id}
+                style={[styles.modalOption, selectedObjekt === obj.id && styles.modalOptionActive]}
+                onPress={() => {
+                  setActiveFilter('objekt');
+                  setSelectedObjekt(obj.id);
+                  setShowObjektModal(false);
+                }}
+              >
+                <Text style={styles.modalOptionText} numberOfLines={1}>{obj.name}</Text>
+                {selectedObjekt === obj.id && (
+                  <Feather name="check" size={18} color="#F97316" />
+                )}
+              </TouchableOpacity>
+            ))}
+
+            {objekte.length === 0 && (
+              <Text style={styles.modalEmpty}>Keine Objekte vorhanden</Text>
+            )}
+          </View>
+        </TouchableOpacity>
+      </Modal>
+
+      {/* Finanzierung Selection Modal */}
+      <Modal
+        visible={showFinanzierungModal}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setShowFinanzierungModal(false)}
+      >
+        <TouchableOpacity
+          style={styles.modalOverlay}
+          activeOpacity={1}
+          onPress={() => setShowFinanzierungModal(false)}
+        >
+          <View style={styles.modalContent}>
+            <Text style={styles.modalTitle}>Nach Finanzierung filtern</Text>
+
+            <TouchableOpacity
+              style={[styles.modalOption, finanzierungFilter === 'alle' && activeFilter === 'finanzierung' && styles.modalOptionActive]}
+              onPress={() => {
+                setActiveFilter('finanzierung');
+                setFinanzierungFilter('alle');
+                setShowFinanzierungModal(false);
+              }}
+            >
+              <Text style={styles.modalOptionText}>Alle</Text>
+              {finanzierungFilter === 'alle' && activeFilter === 'finanzierung' && (
+                <Feather name="check" size={18} color="#F97316" />
+              )}
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={[styles.modalOption, finanzierungFilter === 'simpli' && styles.modalOptionActive]}
+              onPress={() => {
+                setActiveFilter('finanzierung');
+                setFinanzierungFilter('simpli');
+                setShowFinanzierungModal(false);
+              }}
+            >
+              <View style={styles.modalOptionRow}>
+                <View style={[styles.finanzBadge, { backgroundColor: '#D1FAE5' }]}>
+                  <Feather name="zap" size={12} color="#22C55E" />
+                </View>
+                <Text style={styles.modalOptionText}>Simpli Finance</Text>
+              </View>
+              {finanzierungFilter === 'simpli' && (
+                <Feather name="check" size={18} color="#F97316" />
+              )}
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={[styles.modalOption, finanzierungFilter === 'extern' && styles.modalOptionActive]}
+              onPress={() => {
+                setActiveFilter('finanzierung');
+                setFinanzierungFilter('extern');
+                setShowFinanzierungModal(false);
+              }}
+            >
+              <View style={styles.modalOptionRow}>
+                <View style={[styles.finanzBadge, { backgroundColor: '#EDE9FE' }]}>
+                  <Feather name="briefcase" size={12} color="#8B5CF6" />
+                </View>
+                <Text style={styles.modalOptionText}>Extern finanziert</Text>
+              </View>
+              {finanzierungFilter === 'extern' && (
+                <Feather name="check" size={18} color="#F97316" />
+              )}
+            </TouchableOpacity>
+          </View>
+        </TouchableOpacity>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -226,57 +448,73 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'center',
     paddingHorizontal: 20,
-    paddingVertical: 16,
+    paddingVertical: 12,
     backgroundColor: '#FFFFFF',
-    borderBottomWidth: 1,
-    borderBottomColor: '#F3F4F6',
   },
   title: {
     fontSize: 24,
     fontFamily: 'DMSans-Bold',
     color: '#111827'
   },
+  headerRight: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  leadCount: {
+    fontSize: 16,
+    fontFamily: 'DMSans-SemiBold',
+    color: '#6B7280',
+    backgroundColor: '#F3F4F6',
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 8,
+  },
   searchButton: {
-    width: 40,
-    height: 40,
+    width: 36,
+    height: 36,
     borderRadius: 10,
     backgroundColor: '#F3F4F6',
     justifyContent: 'center',
     alignItems: 'center'
+  },
+  filterBar: {
+    flexDirection: 'row',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    backgroundColor: '#FFFFFF',
+    borderBottomWidth: 1,
+    borderBottomColor: '#F3F4F6',
+    gap: 8,
+  },
+  filterChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 20,
+    backgroundColor: '#F3F4F6',
+  },
+  filterChipActive: {
+    backgroundColor: '#FFF7ED',
+    borderWidth: 1,
+    borderColor: '#F97316',
+  },
+  filterChipText: {
+    fontSize: 13,
+    fontFamily: 'DMSans-Medium',
+    color: '#6B7280',
+    maxWidth: 100,
+  },
+  filterChipTextActive: {
+    color: '#F97316'
   },
   scrollView: {
     flex: 1
   },
   scrollContent: {
     paddingHorizontal: 16,
-    paddingTop: 16,
-  },
-  filterContainer: {
-    flexDirection: 'row',
-    gap: 8,
-    marginBottom: 16
-  },
-  filterTab: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 16,
-    backgroundColor: '#FFFFFF',
-    borderWidth: 1,
-    borderColor: '#E5E7EB',
-  },
-  filterTabActive: {
-    backgroundColor: '#FFF7ED',
-    borderColor: '#F97316',
-  },
-  filterText: {
-    fontSize: 13,
-    fontFamily: 'DMSans-Medium',
-    color: '#6B7280'
-  },
-  filterTextActive: {
-    color: '#F97316'
+    paddingTop: 12,
   },
   emptyState: {
     alignItems: 'center',
@@ -301,7 +539,8 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontFamily: 'DMSans-Regular',
     color: '#6B7280',
-    textAlign: 'center'
+    textAlign: 'center',
+    paddingHorizontal: 40,
   },
   leadCard: {
     flexDirection: 'row',
@@ -378,6 +617,67 @@ const styles = StyleSheet.create({
     height: 36,
     borderRadius: 10,
     backgroundColor: '#F3F4F6',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  // Modal Styles
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.4)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 20,
+  },
+  modalContent: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 16,
+    padding: 20,
+    width: '100%',
+    maxWidth: 340,
+    maxHeight: '70%',
+  },
+  modalTitle: {
+    fontSize: 18,
+    fontFamily: 'DMSans-Bold',
+    color: '#111827',
+    marginBottom: 16,
+  },
+  modalOption: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 14,
+    borderBottomWidth: 1,
+    borderBottomColor: '#F3F4F6',
+  },
+  modalOptionActive: {
+    backgroundColor: '#FFF7ED',
+    marginHorizontal: -20,
+    paddingHorizontal: 20,
+  },
+  modalOptionText: {
+    fontSize: 15,
+    fontFamily: 'DMSans-Medium',
+    color: '#374151',
+    flex: 1,
+  },
+  modalOptionRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    flex: 1,
+  },
+  modalEmpty: {
+    fontSize: 14,
+    fontFamily: 'DMSans-Regular',
+    color: '#9CA3AF',
+    textAlign: 'center',
+    paddingVertical: 20,
+  },
+  finanzBadge: {
+    width: 28,
+    height: 28,
+    borderRadius: 8,
     justifyContent: 'center',
     alignItems: 'center',
   },
