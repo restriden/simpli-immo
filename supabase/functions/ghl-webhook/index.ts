@@ -224,6 +224,31 @@ async function handleMessage(supabase: any, connection: any, payload: any) {
       if (analyzeResponse.ok) {
         const analysisResult = await analyzeResponse.json();
         console.log("Message analysis result:", analysisResult);
+
+        // If AI can auto-respond and it's a question, try to send auto-response
+        if (analysisResult.analysis?.can_auto_respond && analysisResult.analysis?.is_question) {
+          console.log("Attempting auto-response...");
+          const autoRespondUrl = `${Deno.env.get("SUPABASE_URL")}/functions/v1/auto-respond`;
+          const autoResponse = await fetch(autoRespondUrl, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              "Authorization": `Bearer ${Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")}`,
+            },
+            body: JSON.stringify({
+              lead_id: lead.id,
+              message_content: messageBody,
+              user_id: connection.user_id,
+            }),
+          });
+
+          if (autoResponse.ok) {
+            const autoResult = await autoResponse.json();
+            console.log("Auto-response result:", autoResult);
+          } else {
+            console.log("Auto-response skipped or failed:", await autoResponse.text());
+          }
+        }
       } else {
         console.error("Message analysis failed:", await analyzeResponse.text());
       }

@@ -8,6 +8,7 @@ import {
   ActivityIndicator,
   Linking,
   Alert,
+  Switch,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
@@ -26,6 +27,7 @@ interface LeadDetails {
   created_at: string;
   updated_at: string;
   ghl_contact_id: string | null;
+  auto_respond_enabled: boolean;
   objekt?: {
     id: string;
     name: string;
@@ -67,10 +69,18 @@ export default function LeadProfileScreen() {
   const [lead, setLead] = useState<LeadDetails | null>(null);
   const [todos, setTodos] = useState<Todo[]>([]);
   const [loading, setLoading] = useState(true);
+  const [autoRespondEnabled, setAutoRespondEnabled] = useState(false);
+  const [togglingAutoRespond, setTogglingAutoRespond] = useState(false);
 
   useEffect(() => {
     loadLeadData();
   }, [id, user?.id]);
+
+  useEffect(() => {
+    if (lead) {
+      setAutoRespondEnabled(lead.auto_respond_enabled || false);
+    }
+  }, [lead]);
 
   const loadLeadData = async () => {
     if (!id || !user?.id) return;
@@ -130,6 +140,37 @@ export default function LeadProfileScreen() {
       return;
     }
     Linking.openURL(`mailto:${lead.email}`);
+  };
+
+  const toggleAutoRespond = async (value: boolean) => {
+    if (!id || togglingAutoRespond) return;
+
+    setTogglingAutoRespond(true);
+    setAutoRespondEnabled(value); // Optimistic update
+
+    try {
+      const { error } = await supabase
+        .from('leads')
+        .update({ auto_respond_enabled: value })
+        .eq('id', id);
+
+      if (error) {
+        throw error;
+      }
+
+      if (value) {
+        Alert.alert(
+          'KI-Antworten aktiviert',
+          'Die KI wird jetzt automatisch auf Fragen dieses Kontakts antworten, wenn sie die Antwort kennt.'
+        );
+      }
+    } catch (error) {
+      console.error('Error toggling auto-respond:', error);
+      setAutoRespondEnabled(!value); // Revert on error
+      Alert.alert('Fehler', 'Einstellung konnte nicht gespeichert werden.');
+    } finally {
+      setTogglingAutoRespond(false);
+    }
   };
 
   if (loading) {
@@ -263,6 +304,41 @@ export default function LeadProfileScreen() {
             </View>
             <Feather name="chevron-right" size={20} color="#D1D5DB" />
           </View>
+        </View>
+
+        {/* KI Auto-Response */}
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>KI-Assistent</Text>
+          <View style={styles.autoRespondCard}>
+            <View style={styles.autoRespondInfo}>
+              <View style={[styles.autoRespondIcon, autoRespondEnabled && styles.autoRespondIconActive]}>
+                <Feather name="cpu" size={20} color={autoRespondEnabled ? '#FFFFFF' : '#6B7280'} />
+              </View>
+              <View style={styles.autoRespondContent}>
+                <Text style={styles.autoRespondTitle}>Auto-Antworten</Text>
+                <Text style={styles.autoRespondDesc}>
+                  {autoRespondEnabled
+                    ? 'KI antwortet automatisch auf Fragen'
+                    : 'KI analysiert nur, antwortet nicht'}
+                </Text>
+              </View>
+            </View>
+            <Switch
+              value={autoRespondEnabled}
+              onValueChange={toggleAutoRespond}
+              disabled={togglingAutoRespond}
+              trackColor={{ false: '#E5E7EB', true: '#86EFAC' }}
+              thumbColor={autoRespondEnabled ? '#22C55E' : '#9CA3AF'}
+            />
+          </View>
+          {autoRespondEnabled && (
+            <View style={styles.autoRespondWarning}>
+              <Feather name="info" size={14} color="#F97316" />
+              <Text style={styles.autoRespondWarningText}>
+                Die KI nutzt nur Wissen vom zugeordneten Objekt und beantwortet Fragen sofort.
+              </Text>
+            </View>
+          )}
         </View>
 
         {/* Tasks */}
@@ -473,4 +549,61 @@ const styles = StyleSheet.create({
     padding: 16,
   },
   notesText: { fontSize: 14, fontFamily: 'DMSans-Regular', color: '#374151', lineHeight: 20 },
+  // Auto-Respond
+  autoRespondCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: '#FFFFFF',
+    borderRadius: 16,
+    padding: 16,
+  },
+  autoRespondInfo: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
+  },
+  autoRespondIcon: {
+    width: 44,
+    height: 44,
+    borderRadius: 12,
+    backgroundColor: '#F3F4F6',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  autoRespondIconActive: {
+    backgroundColor: '#22C55E',
+  },
+  autoRespondContent: {
+    flex: 1,
+    marginLeft: 12,
+    marginRight: 12,
+  },
+  autoRespondTitle: {
+    fontSize: 15,
+    fontFamily: 'DMSans-SemiBold',
+    color: '#111827',
+  },
+  autoRespondDesc: {
+    fontSize: 13,
+    fontFamily: 'DMSans-Regular',
+    color: '#6B7280',
+    marginTop: 2,
+  },
+  autoRespondWarning: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 8,
+    backgroundColor: '#FFF7ED',
+    borderRadius: 10,
+    padding: 12,
+    marginTop: 10,
+  },
+  autoRespondWarningText: {
+    flex: 1,
+    fontSize: 12,
+    fontFamily: 'DMSans-Regular',
+    color: '#9A3412',
+    lineHeight: 18,
+  },
 });
