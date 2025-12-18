@@ -28,6 +28,7 @@ interface SyncResult {
   contacts: { synced: number; errors: number };
   conversations: { synced: number; errors: number };
   appointments: { synced: number; errors: number };
+  tasks: { synced: number; errors: number };
 }
 
 serve(async (req: Request) => {
@@ -199,6 +200,7 @@ async function syncConnection(
     contacts: { synced: 0, errors: 0 },
     conversations: { synced: 0, errors: 0 },
     appointments: { synced: 0, errors: 0 },
+    tasks: { synced: 0, errors: 0 },
   };
 
   const headers = {
@@ -236,6 +238,16 @@ async function syncConnection(
     } catch (err) {
       console.error("Appointments sync error:", err);
       result.appointments.errors = 1;
+    }
+  }
+
+  // Sync Tasks
+  if (syncType === "full" || syncType === "tasks") {
+    try {
+      result.tasks = await syncTasks(supabase, connection, headers);
+    } catch (err) {
+      console.error("Tasks sync error:", err);
+      result.tasks.errors = 1;
     }
   }
 
@@ -697,6 +709,126 @@ function mapGHLTagsToStatus(tags: string[]): string {
   }
 
   return "neu";
+}
+
+async function syncTasks(
+  supabase: any,
+  connection: GHLConnection,
+  headers: Record<string, string>
+): Promise<{ synced: number; errors: number }> {
+  let synced = 0;
+  let errors = 0;
+
+  console.log("=== SYNC TASKS ===");
+  console.log("Location ID:", connection.location_id);
+
+  // Get all leads with ghl_contact_id for this user
+  const { data: leads, error: leadsError } = await supabase
+    .from("leads")
+    .select("id, ghl_contact_id")
+    .eq("user_id", connection.user_id)
+    .not("ghl_contact_id", "is", null);
+
+  if (leadsError || !leads) {
+    console.error("Error fetching leads:", leadsError);
+    return { synced: 0, errors: 1 };
+  }
+
+  console.log("Leads with GHL contact ID:", leads.length);
+
+  // Fetch tasks for each contact
+  for (const lead of leads) {
+    try {
+      const tasksUrl = `${GHL_API_BASE}/contacts/${lead.ghl_contact_id}/tasks`;
+      console.log("Fetching tasks for contact:", lead.ghl_contact_id);
+
+      const response = await fetch(tasksUrl, { headers });
+
+      if (!response.ok) {
+        if (response.status === 404) {
+          // No tasks for this contact
+          continue;
+        }
+        console.error("Tasks API error:", response.status);
+        errors++;
+        continue;
+      }
+
+      const data = await response.json();
+      const tasks = data.tasks || [];
+      console.log("Tasks found for contact:", tasks.length);
+
+      for (const task of tasks) {
+        try {
+          // Determine priority
+          let priority = "normal";
+          if (task.priority === "high" || task.priority === "urgent") {
+            priority = "dringend";
+          }
+
+          // Determine type based on task title
+          let todoType = "nachricht";
+          const title = (task.title || task.name || "Aufgabe").toLowerCase();
+          if (title.includes("anruf") || title.includes("call") || title.includes("phone")) {
+            todoType = "anruf";
+          } else if (title.includes("besichtigung") || title.includes("termin") || title.includes("viewing")) {
+            todoType = "besichtigung";
+          } else if (title.includes("finanzierung") || title.includes("financing")) {
+            todoType = "finanzierung";
+          } else if (title.includes("dokument") || title.includes("document") || title.includes("unterlagen")) {
+            todoType = "dokument";
+          }
+
+          const isCompleted = task.status === "completed" || task.completed === true;
+
+          const todoData = {
+            user_id: connection.user_id,
+            lead_id: lead.id,
+            ghl_task_id: task.id,
+            type: todoType,
+            priority: priority,
+            title: task.title || task.name || "Aufgabe",
+            subtitle: task.description || task.body || task.notes || null,
+            completed: isCompleted,
+            due_date: task.dueDate || task.due_date || null,
+            ghl_data: task,
+          };
+
+          // Upsert: update if exists, insert if not
+          const { data: existing } = await supabase
+            .from("todos")
+            .select("id")
+            .eq("ghl_task_id", task.id)
+            .single();
+
+          if (existing) {
+            await supabase
+              .from("todos")
+              .update(todoData)
+              .eq("id", existing.id);
+          } else {
+            await supabase
+              .from("todos")
+              .insert(todoData);
+          }
+
+          synced++;
+        } catch (taskErr) {
+          console.error("Error syncing task:", taskErr);
+          errors++;
+        }
+      }
+
+      // Rate limiting
+      await sleep(100);
+    } catch (err) {
+      console.error("Error fetching tasks for contact:", lead.ghl_contact_id, err);
+      errors++;
+    }
+  }
+
+  console.log("Tasks sync complete. Synced:", synced, "Errors:", errors);
+  return { synced, errors };
 }
 
 async function logSync(
