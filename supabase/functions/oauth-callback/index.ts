@@ -303,79 +303,19 @@ async function getLocationDetails(
 function redirectToApp(success: boolean, message: string): Response {
   const encodedMessage = encodeURIComponent(message);
 
-  // Try app deep link first, fallback to web
+  // Use deep link for app redirect (HTTP 302)
   const appRedirect = success
     ? `${APP_SUCCESS_REDIRECT}?message=${encodedMessage}`
     : `${APP_ERROR_REDIRECT}?message=${encodedMessage}`;
 
-  const webRedirect = success
-    ? `${WEB_SUCCESS_REDIRECT}?message=${encodedMessage}`
-    : `${WEB_ERROR_REDIRECT}?message=${encodedMessage}`;
+  console.log("Redirecting to:", appRedirect);
 
-  // Return HTML that tries app first, then web
-  const html = `
-    <!DOCTYPE html>
-    <html>
-      <head>
-        <meta charset="utf-8">
-        <title>Simpli.Immo - GHL Verbindung</title>
-        <style>
-          body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            min-height: 100vh;
-            margin: 0;
-            background: linear-gradient(135deg, #F97316 0%, #EA580C 100%);
-            color: white;
-          }
-          .container {
-            text-align: center;
-            padding: 40px;
-            background: rgba(255,255,255,0.1);
-            border-radius: 20px;
-            backdrop-filter: blur(10px);
-          }
-          h1 { margin-bottom: 16px; }
-          p { opacity: 0.9; margin-bottom: 24px; }
-          .icon { font-size: 64px; margin-bottom: 20px; }
-          a {
-            display: inline-block;
-            background: white;
-            color: #F97316;
-            padding: 12px 24px;
-            border-radius: 12px;
-            text-decoration: none;
-            font-weight: 600;
-          }
-        </style>
-        <script>
-          // Try to open app
-          window.location.href = "${appRedirect}";
-
-          // Fallback to web after delay
-          setTimeout(function() {
-            window.location.href = "${webRedirect}";
-          }, 2000);
-        </script>
-      </head>
-      <body>
-        <div class="container">
-          <div class="icon">${success ? "✅" : "❌"}</div>
-          <h1>${success ? "Verbindung erfolgreich!" : "Verbindung fehlgeschlagen"}</h1>
-          <p>${message}</p>
-          <p>Du wirst automatisch weitergeleitet...</p>
-          <a href="${webRedirect}">Manuell weiter</a>
-        </div>
-      </body>
-    </html>
-  `;
-
-  return new Response(html, {
-    status: 200,
+  // Return HTTP 302 redirect to deep link
+  // This is what WebBrowser.openAuthSessionAsync expects
+  return new Response(null, {
+    status: 302,
     headers: {
-      "Content-Type": "text/html; charset=utf-8",
+      "Location": appRedirect,
     },
   });
 }
