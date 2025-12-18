@@ -106,6 +106,31 @@ export default function ObjektErstellenScreen() {
           showsVerticalScrollIndicator={false}
           keyboardShouldPersistTaps="handled"
         >
+          {/* Magic Upload */}
+          <TouchableOpacity
+            style={styles.magicCard}
+            onPress={() => router.push('/magic-upload?mode=create')}
+          >
+            <View style={styles.magicIconContainer}>
+              <Feather name="upload" size={24} color="#FFFFFF" />
+            </View>
+            <View style={styles.magicContent}>
+              <Text style={styles.magicTitle}>Exposé hochladen</Text>
+              <Text style={styles.magicSubtitle}>
+                KI füllt alle Felder automatisch aus
+              </Text>
+            </View>
+            <View style={styles.magicArrow}>
+              <Feather name="arrow-right" size={20} color="#FFFFFF" />
+            </View>
+          </TouchableOpacity>
+
+          <View style={styles.dividerRow}>
+            <View style={styles.dividerLine} />
+            <Text style={styles.dividerText}>oder manuell eingeben</Text>
+            <View style={styles.dividerLine} />
+          </View>
+
           {/* Name */}
           <View style={styles.inputGroup}>
             <Text style={styles.inputLabel}>Objektname *</Text>
@@ -203,7 +228,7 @@ export default function ObjektErstellenScreen() {
           <View style={styles.infoBox}>
             <Feather name="info" size={18} color="#3B82F6" />
             <Text style={styles.infoText}>
-              Nach dem Erstellen kannst du ein Exposé hochladen und KI-Wissen hinzufügen.
+              Tipp: Lade oben ein Exposé hoch, dann werden alle Felder automatisch ausgefüllt.
             </Text>
           </View>
 
@@ -353,5 +378,62 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontFamily: 'DMSans-SemiBold',
     color: '#FFFFFF',
+  },
+  // Magic Upload Card
+  magicCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#F97316',
+    borderRadius: 16,
+    padding: 16,
+    marginBottom: 20,
+  },
+  magicIconContainer: {
+    width: 48,
+    height: 48,
+    borderRadius: 12,
+    backgroundColor: 'rgba(255,255,255,0.2)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  magicContent: {
+    flex: 1,
+    marginLeft: 12,
+  },
+  magicTitle: {
+    fontSize: 16,
+    fontFamily: 'DMSans-SemiBold',
+    color: '#FFFFFF',
+  },
+  magicSubtitle: {
+    fontSize: 13,
+    fontFamily: 'DMSans-Regular',
+    color: 'rgba(255,255,255,0.8)',
+    marginTop: 2,
+  },
+  magicArrow: {
+    width: 36,
+    height: 36,
+    borderRadius: 10,
+    backgroundColor: 'rgba(255,255,255,0.2)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  // Divider
+  dividerRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 20,
+  },
+  dividerLine: {
+    flex: 1,
+    height: 1,
+    backgroundColor: '#E5E7EB',
+  },
+  dividerText: {
+    fontSize: 13,
+    fontFamily: 'DMSans-Regular',
+    color: '#9CA3AF',
+    paddingHorizontal: 12,
   },
 });
