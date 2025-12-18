@@ -11,6 +11,9 @@ const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 
 // Possible field names for objekt in GHL contact
 const OBJEKT_FIELD_NAMES = [
+  'objekttitel',
+  'Objekttitel',
+  'objekt_titel',
   'property_name',
   'property',
   'objekt',
