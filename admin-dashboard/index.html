@@ -544,17 +544,17 @@
     const SUPABASE_URL = 'https://hsfrdovpgxtqbitmkrhs.supabase.co';
     const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImhzZnJkb3ZwZ3h0cWJpdG1rcmhzIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjU5MjM2MjQsImV4cCI6MjA4MTQ5OTYyNH0.GQhnvrYlcCcx0qZg0-yVolu5J5aa9RwyNxW-gG4ccsk';
 
-    const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+    const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
     let currentUser = null;
 
     // Check auth on load
     async function checkAuth() {
-      const { data: { session } } = await supabase.auth.getSession();
+      const { data: { session } } = await supabaseClient.auth.getSession();
 
       if (session?.user) {
         // Check if user is admin
-        const { data: adminData } = await supabase
+        const { data: adminData } = await supabaseClient
           .from('admin_users')
           .select('role')
           .eq('user_id', session.user.id)
@@ -566,7 +566,7 @@
           loadData();
         } else {
           showError('Du hast keine Admin-Berechtigung.');
-          await supabase.auth.signOut();
+          await supabaseClient.auth.signOut();
         }
       }
     }
@@ -584,7 +584,7 @@
       hideError();
 
       try {
-        const { data, error } = await supabase.auth.signInWithPassword({
+        const { data, error } = await supabaseClient.auth.signInWithPassword({
           email,
           password
         });
@@ -592,14 +592,14 @@
         if (error) throw error;
 
         // Check admin status
-        const { data: adminData, error: adminError } = await supabase
+        const { data: adminData, error: adminError } = await supabaseClient
           .from('admin_users')
           .select('role')
           .eq('user_id', data.user.id)
           .single();
 
         if (adminError || !adminData) {
-          await supabase.auth.signOut();
+          await supabaseClient.auth.signOut();
           throw new Error('Du hast keine Admin-Berechtigung.');
         }
 
@@ -617,7 +617,7 @@
 
     // Logout
     async function logout() {
-      await supabase.auth.signOut();
+      await supabaseClient.auth.signOut();
       currentUser = null;
       document.getElementById('dashboard').classList.remove('active');
       document.getElementById('loginContainer').classList.remove('hidden');
@@ -660,10 +660,10 @@
 
     async function loadStats() {
       const [whitelist, connections, leads, messages] = await Promise.all([
-        supabase.from('approved_subaccounts').select('id', { count: 'exact' }),
-        supabase.from('ghl_connections').select('id', { count: 'exact' }).eq('is_active', true),
-        supabase.from('leads').select('id', { count: 'exact' }),
-        supabase.from('messages').select('id', { count: 'exact' })
+        supabaseClient.from('approved_subaccounts').select('id', { count: 'exact' }),
+        supabaseClient.from('ghl_connections').select('id', { count: 'exact' }).eq('is_active', true),
+        supabaseClient.from('leads').select('id', { count: 'exact' }),
+        supabaseClient.from('messages').select('id', { count: 'exact' })
       ]);
 
       document.getElementById('statWhitelist').textContent = whitelist.count || 0;
@@ -673,7 +673,7 @@
     }
 
     async function loadWhitelist() {
-      const { data, error } = await supabase
+      const { data, error } = await supabaseClient
         .from('approved_subaccounts')
         .select('*')
         .order('created_at', { ascending: false });
@@ -711,7 +711,7 @@
     }
 
     async function loadConnections() {
-      const { data, error } = await supabase
+      const { data, error } = await supabaseClient
         .from('ghl_connections')
         .select('*')
         .order('created_at', { ascending: false });
@@ -747,7 +747,7 @@
 
     // Actions
     async function toggleSubaccount(id, isActive) {
-      await supabase
+      await supabaseClient
         .from('approved_subaccounts')
         .update({ is_active: isActive, updated_at: new Date().toISOString() })
         .eq('id', id);
@@ -759,7 +759,7 @@
     async function deleteSubaccount(id) {
       if (!confirm('Subaccount wirklich loschen?')) return;
 
-      await supabase
+      await supabaseClient
         .from('approved_subaccounts')
         .delete()
         .eq('id', id);
@@ -771,7 +771,7 @@
     async function disconnectConnection(id) {
       if (!confirm('Verbindung wirklich trennen?')) return;
 
-      await supabase
+      await supabaseClient
         .from('ghl_connections')
         .update({ is_active: false })
         .eq('id', id);
@@ -798,7 +798,7 @@
         return;
       }
 
-      const { error } = await supabase
+      const { error } = await supabaseClient
         .from('approved_subaccounts')
         .insert({
           location_id: locationId,
