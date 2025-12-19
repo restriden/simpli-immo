@@ -1428,6 +1428,37 @@
     .btn-copy:hover {
       background: #E5E7EB;
     }
+
+    .archive-toggle {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 13px;
+      color: #6B7280;
+      cursor: pointer;
+    }
+
+    .archive-toggle input[type="checkbox"] {
+      width: 16px;
+      height: 16px;
+      cursor: pointer;
+    }
+
+    .archived-row {
+      opacity: 0.6;
+      background: #F9FAFB;
+    }
+
+    .archived-badge {
+      display: inline-block;
+      padding: 2px 6px;
+      background: #9CA3AF;
+      color: white;
+      border-radius: 4px;
+      font-size: 10px;
+      font-weight: 600;
+      margin-left: 6px;
+    }
   </style>
 </head>
 <body>
@@ -1626,6 +1657,10 @@
             <button class="filter-btn" data-filter="attention" onclick="filterLeads('attention')">&#9888; Aufmerksamkeit</button>
           </div>
           <div class="filter-controls">
+            <label class="archive-toggle">
+              <input type="checkbox" id="showArchived" onchange="toggleArchived()">
+              <span>Archivierte anzeigen</span>
+            </label>
             <select id="subaccountFilter" class="subaccount-select" onchange="filterBySubaccount(this.value)">
               <option value="alle">Alle Makler</option>
             </select>
@@ -2124,8 +2159,24 @@
     }
 
     async function disconnectConnection(id) {
-      if (!confirm('Verbindung wirklich trennen?')) return;
+      if (!confirm('Verbindung trennen?\n\nAlle Leads dieses Accounts werden archiviert und nicht mehr analysiert.')) return;
 
+      // Get connection to find user_id
+      const { data: connection } = await supabaseClient
+        .from('ghl_connections')
+        .select('user_id')
+        .eq('id', id)
+        .single();
+
+      if (connection) {
+        // Archive all leads for this connection
+        await supabaseClient
+          .from('leads')
+          .update({ is_archived: true })
+          .eq('user_id', connection.user_id);
+      }
+
+      // Deactivate connection
       await supabaseClient
         .from('ghl_connections')
         .update({ is_active: false })
@@ -2133,6 +2184,7 @@
 
       loadConnections();
       loadStats();
+      loadLeadsAnalyse(); // Refresh leads list
     }
 
     async function reconnectConnection(id) {
@@ -2565,13 +2617,14 @@
     let allSubaccounts = [];
     let currentFilter = 'alle';
     let currentSubaccountFilter = 'alle';
+    let showArchivedFilter = false;
 
     async function loadLeadsAnalyse() {
       try {
-        // Load all leads
+        // Load all leads (including archived for filtering)
         const { data: leads, error: leadsError } = await supabaseClient
           .from('leads')
-          .select('id, name, email, phone, status, created_at, user_id, conversation_status, ai_quality_score, ai_improvement_suggestion, last_message_at, last_analyzed_at')
+          .select('id, name, email, phone, status, created_at, user_id, conversation_status, ai_quality_score, ai_improvement_suggestion, last_message_at, last_analyzed_at, is_archived')
           .order('last_message_at', { ascending: false, nullsFirst: false });
 
         if (leadsError) throw leadsError;
@@ -2615,14 +2668,22 @@
       }
     }
 
+    function getFilteredLeads() {
+      // First filter by archived status
+      let filtered = showArchivedFilter ? allLeadsData : allLeadsData.filter(l => !l.is_archived);
+      return filtered;
+    }
+
     function updateSubaccountFilter() {
       const select = document.getElementById('subaccountFilter');
       if (!select) return;
 
+      const filteredLeads = getFilteredLeads();
+
       // Update options
-      select.innerHTML = `<option value="alle">Alle Makler (${allLeadsData.length})</option>` +
+      select.innerHTML = `<option value="alle">Alle Makler (${filteredLeads.length})</option>` +
         allSubaccounts.map(s => {
-          const count = allLeadsData.filter(l => l.ghl_connections?.location_id === s.id).length;
+          const count = filteredLeads.filter(l => l.ghl_connections?.location_id === s.id).length;
           return `<option value="${s.id}">${s.name} (${count})</option>`;
         }).join('');
 
@@ -2635,24 +2696,39 @@
       renderLeadsTable();
     }
 
+    function toggleArchived() {
+      showArchivedFilter = document.getElementById('showArchived').checked;
+      updateSubaccountFilter();
+      updateAnalyseStats();
+      renderLeadsTable();
+    }
+
     function updateAnalyseStats() {
-      const total = allLeadsData.length;
-      const withScore = allLeadsData.filter(l => l.ai_quality_score !== null);
+      const filteredLeads = getFilteredLeads();
+      const total = filteredLeads.length;
+      const withScore = filteredLeads.filter(l => l.ai_quality_score !== null);
       const avgQuality = withScore.length > 0
         ? (withScore.reduce((sum, l) => sum + l.ai_quality_score, 0) / withScore.length).toFixed(1)
         : '-';
 
-      const needsAttention = allLeadsData.filter(l =>
+      const needsAttention = filteredLeads.filter(l =>
         l.conversation_status === 'unterhaltung_abgebrochen' ||
         (l.ai_quality_score !== null && l.ai_quality_score < 5)
       ).length;
 
-      const notAnalyzed = allLeadsData.filter(l =>
+      const notAnalyzed = filteredLeads.filter(l =>
         l.last_analyzed_at === null ||
         (l.last_message_at && new Date(l.last_message_at) > new Date(l.last_analyzed_at))
       ).length;
 
-      document.getElementById('analyseTotal').textContent = total;
+      // Count archived leads
+      const archivedCount = allLeadsData.filter(l => l.is_archived).length;
+      if (archivedCount > 0 && !showArchivedFilter) {
+        document.getElementById('analyseTotal').textContent = `${total} (+${archivedCount} archiviert)`;
+      } else {
+        document.getElementById('analyseTotal').textContent = total;
+      }
+
       document.getElementById('analyseQuality').textContent = avgQuality;
       document.getElementById('analyseAttention').textContent = needsAttention;
       document.getElementById('analyseNotAnalyzed').textContent = notAnalyzed;
@@ -2669,7 +2745,8 @@
     }
 
     function renderLeadsTable() {
-      let filteredLeads = allLeadsData;
+      // Start with archived-filtered leads
+      let filteredLeads = getFilteredLeads();
 
       // Apply subaccount filter
       if (currentSubaccountFilter !== 'alle') {
@@ -2704,11 +2781,14 @@
         const hasNewMessages = lead.last_message_at &&
           (!lead.last_analyzed_at || new Date(lead.last_message_at) > new Date(lead.last_analyzed_at));
 
+        const isArchived = lead.is_archived;
+
         return `
-          <tr onclick="openConversation('${lead.id}')">
+          <tr onclick="openConversation('${lead.id}')" class="${isArchived ? 'archived-row' : ''}">
             <td>
               <strong>${escapeHtml(lead.name || 'Unbekannt')}</strong>
-              ${hasNewMessages ? '<span class="new-badge">NEU</span>' : ''}
+              ${isArchived ? '<span class="archived-badge">ARCHIVIERT</span>' : ''}
+              ${hasNewMessages && !isArchived ? '<span class="new-badge">NEU</span>' : ''}
               <br><small style="color: #6B7280;">${lead.email || lead.phone || '-'}</small>
             </td>
             <td>${lead.ghl_connections?.location_name || '-'}</td>

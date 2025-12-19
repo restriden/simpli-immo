@@ -113,11 +113,12 @@ serve(async (req) => {
       }
     }
 
-    // Get all leads for these users
+    // Get all leads for these users (excluding archived)
     const { data: allLeads, error: leadsError } = await supabase
       .from('leads')
-      .select('id, user_id, name, email, phone, status, last_analyzed_at, last_message_at, conversation_status')
-      .in('user_id', userIds);
+      .select('id, user_id, name, email, phone, status, last_analyzed_at, last_message_at, conversation_status, is_archived')
+      .in('user_id', userIds)
+      .or('is_archived.is.null,is_archived.eq.false');
 
     if (leadsError) {
       console.error('Error fetching leads:', leadsError);
