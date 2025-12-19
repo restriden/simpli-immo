@@ -12,7 +12,6 @@ import {
   registerCRMWebhooks,
   CRMConnection
 } from '../../lib/crm';
-import { isAdmin } from '../../lib/admin';
 
 export default function ProfilScreen() {
   const router = useRouter();
@@ -24,10 +23,7 @@ export default function ProfilScreen() {
   const [crmSyncing, setCrmSyncing] = useState(false);
   const [crmRegisteringWebhooks, setCrmRegisteringWebhooks] = useState(false);
 
-  // Admin State
-  const [isAdminUser, setIsAdminUser] = useState(false);
-
-  // Load CRM connection status and admin check
+  // Load CRM connection status
   const loadCRMStatus = async () => {
     if (authLoading) return;
     if (!user?.id) {
@@ -37,12 +33,8 @@ export default function ProfilScreen() {
 
     setCrmLoading(true);
     try {
-      const [connection, adminStatus] = await Promise.all([
-        checkCRMConnection(user.id),
-        isAdmin(user.id),
-      ]);
+      const connection = await checkCRMConnection(user.id);
       setCrmConnection(connection);
-      setIsAdminUser(adminStatus);
     } catch (error) {
       console.error('Error loading CRM status:', error);
     } finally {
@@ -287,28 +279,6 @@ export default function ProfilScreen() {
           </TouchableOpacity>
         </View>
 
-        {/* Admin Section - only visible for admins */}
-        {isAdminUser && (
-          <View style={styles.section}>
-            <Text style={styles.sectionTitle}>Administration</Text>
-            <TouchableOpacity
-              style={styles.adminCard}
-              onPress={() => router.push('/admin')}
-            >
-              <View style={styles.adminHeader}>
-                <View style={styles.adminIconContainer}>
-                  <Feather name="shield" size={24} color="#FFFFFF" />
-                </View>
-                <View style={styles.adminContent}>
-                  <Text style={styles.adminTitle}>Admin Dashboard</Text>
-                  <Text style={styles.adminSubtitle}>Subaccounts & Whitelist verwalten</Text>
-                </View>
-                <Feather name="chevron-right" size={20} color="#FFFFFF" />
-              </View>
-            </TouchableOpacity>
-          </View>
-        )}
-
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Einstellungen</Text>
           <View style={styles.menuCard}>
@@ -401,11 +371,4 @@ const styles = StyleSheet.create({
   crmNotConnectedTitle: { fontSize: 16, fontFamily: 'DMSans-SemiBold', color: '#111827', marginBottom: 4 },
   crmNotConnectedText: { fontSize: 13, fontFamily: 'DMSans-Regular', color: '#6B7280', textAlign: 'center', lineHeight: 20 },
 
-  // Admin Styles
-  adminCard: { backgroundColor: '#8B5CF6', borderRadius: 16, padding: 16 },
-  adminHeader: { flexDirection: 'row', alignItems: 'center' },
-  adminIconContainer: { width: 48, height: 48, borderRadius: 12, backgroundColor: 'rgba(255,255,255,0.2)', justifyContent: 'center', alignItems: 'center' },
-  adminContent: { flex: 1, marginLeft: 12 },
-  adminTitle: { fontSize: 16, fontFamily: 'DMSans-SemiBold', color: '#FFFFFF' },
-  adminSubtitle: { fontSize: 13, fontFamily: 'DMSans-Regular', color: 'rgba(255,255,255,0.8)', marginTop: 1 },
 });

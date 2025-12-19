@@ -1,0 +1,827 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>simpli.immo Admin Dashboard</title>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: #F3F4F6;
+      min-height: 100vh;
+    }
+
+    .login-container {
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      min-height: 100vh;
+      padding: 20px;
+    }
+
+    .login-card {
+      background: white;
+      border-radius: 16px;
+      padding: 40px;
+      width: 100%;
+      max-width: 400px;
+      box-shadow: 0 4px 6px rgba(0,0,0,0.05);
+    }
+
+    .login-card h1 {
+      font-size: 24px;
+      color: #111827;
+      margin-bottom: 8px;
+    }
+
+    .login-card p {
+      color: #6B7280;
+      margin-bottom: 24px;
+    }
+
+    .form-group {
+      margin-bottom: 16px;
+    }
+
+    .form-group label {
+      display: block;
+      font-size: 14px;
+      font-weight: 500;
+      color: #374151;
+      margin-bottom: 6px;
+    }
+
+    .form-group input {
+      width: 100%;
+      padding: 12px 16px;
+      border: 1px solid #E5E7EB;
+      border-radius: 10px;
+      font-size: 16px;
+      transition: border-color 0.2s;
+    }
+
+    .form-group input:focus {
+      outline: none;
+      border-color: #F97316;
+    }
+
+    .btn {
+      width: 100%;
+      padding: 14px;
+      border: none;
+      border-radius: 10px;
+      font-size: 16px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: opacity 0.2s;
+    }
+
+    .btn:hover { opacity: 0.9; }
+    .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+    .btn-primary {
+      background: #F97316;
+      color: white;
+    }
+
+    .btn-secondary {
+      background: #F3F4F6;
+      color: #374151;
+    }
+
+    .btn-danger {
+      background: #FEE2E2;
+      color: #EF4444;
+    }
+
+    .error-message {
+      background: #FEE2E2;
+      color: #EF4444;
+      padding: 12px;
+      border-radius: 8px;
+      margin-bottom: 16px;
+      font-size: 14px;
+    }
+
+    /* Dashboard Styles */
+    .dashboard { display: none; }
+    .dashboard.active { display: block; }
+    .login-container.hidden { display: none; }
+
+    .header {
+      background: white;
+      padding: 16px 24px;
+      border-bottom: 1px solid #E5E7EB;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .header h1 {
+      font-size: 20px;
+      color: #111827;
+    }
+
+    .header-right {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+    }
+
+    .user-info {
+      font-size: 14px;
+      color: #6B7280;
+    }
+
+    .logout-btn {
+      padding: 8px 16px;
+      background: #F3F4F6;
+      border: none;
+      border-radius: 8px;
+      cursor: pointer;
+      font-size: 14px;
+      color: #374151;
+    }
+
+    .main-content {
+      max-width: 1200px;
+      margin: 0 auto;
+      padding: 24px;
+    }
+
+    .tabs {
+      display: flex;
+      gap: 8px;
+      margin-bottom: 24px;
+    }
+
+    .tab {
+      padding: 10px 20px;
+      background: white;
+      border: none;
+      border-radius: 10px;
+      cursor: pointer;
+      font-size: 14px;
+      font-weight: 500;
+      color: #6B7280;
+      transition: all 0.2s;
+    }
+
+    .tab.active {
+      background: #FFF7ED;
+      color: #F97316;
+    }
+
+    .stats-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+      gap: 16px;
+      margin-bottom: 24px;
+    }
+
+    .stat-card {
+      background: white;
+      border-radius: 12px;
+      padding: 20px;
+      text-align: center;
+    }
+
+    .stat-card .icon {
+      width: 48px;
+      height: 48px;
+      border-radius: 12px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      margin: 0 auto 12px;
+      font-size: 24px;
+    }
+
+    .stat-card .value {
+      font-size: 32px;
+      font-weight: 700;
+      color: #111827;
+    }
+
+    .stat-card .label {
+      font-size: 14px;
+      color: #6B7280;
+      margin-top: 4px;
+    }
+
+    .card {
+      background: white;
+      border-radius: 12px;
+      overflow: hidden;
+    }
+
+    .card-header {
+      padding: 16px 20px;
+      border-bottom: 1px solid #F3F4F6;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .card-header h2 {
+      font-size: 16px;
+      color: #111827;
+    }
+
+    .card-body {
+      padding: 0;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+    }
+
+    th, td {
+      padding: 14px 20px;
+      text-align: left;
+      border-bottom: 1px solid #F3F4F6;
+    }
+
+    th {
+      font-size: 12px;
+      font-weight: 600;
+      color: #6B7280;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      background: #F9FAFB;
+    }
+
+    td {
+      font-size: 14px;
+      color: #111827;
+    }
+
+    .badge {
+      display: inline-block;
+      padding: 4px 10px;
+      border-radius: 6px;
+      font-size: 12px;
+      font-weight: 500;
+    }
+
+    .badge-success { background: #D1FAE5; color: #059669; }
+    .badge-warning { background: #FEF3C7; color: #D97706; }
+    .badge-danger { background: #FEE2E2; color: #EF4444; }
+
+    .actions {
+      display: flex;
+      gap: 8px;
+    }
+
+    .action-btn {
+      padding: 6px 12px;
+      border: none;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 12px;
+      font-weight: 500;
+    }
+
+    .action-btn.toggle {
+      background: #DBEAFE;
+      color: #2563EB;
+    }
+
+    .action-btn.delete {
+      background: #FEE2E2;
+      color: #EF4444;
+    }
+
+    .empty-state {
+      padding: 60px 20px;
+      text-align: center;
+      color: #6B7280;
+    }
+
+    .empty-state .icon {
+      font-size: 48px;
+      margin-bottom: 16px;
+    }
+
+    /* Modal */
+    .modal-overlay {
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background: rgba(0,0,0,0.5);
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      z-index: 1000;
+    }
+
+    .modal-overlay.hidden { display: none; }
+
+    .modal {
+      background: white;
+      border-radius: 16px;
+      width: 100%;
+      max-width: 500px;
+      max-height: 90vh;
+      overflow-y: auto;
+    }
+
+    .modal-header {
+      padding: 20px;
+      border-bottom: 1px solid #F3F4F6;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .modal-header h3 {
+      font-size: 18px;
+      color: #111827;
+    }
+
+    .modal-close {
+      background: none;
+      border: none;
+      font-size: 24px;
+      color: #6B7280;
+      cursor: pointer;
+    }
+
+    .modal-body {
+      padding: 20px;
+    }
+
+    .modal-footer {
+      padding: 20px;
+      border-top: 1px solid #F3F4F6;
+      display: flex;
+      gap: 12px;
+      justify-content: flex-end;
+    }
+
+    .modal-footer .btn {
+      width: auto;
+      padding: 12px 24px;
+    }
+
+    .tab-content { display: none; }
+    .tab-content.active { display: block; }
+
+    @media (max-width: 768px) {
+      .header { flex-direction: column; gap: 12px; text-align: center; }
+      .stats-grid { grid-template-columns: repeat(2, 1fr); }
+      .tabs { flex-wrap: wrap; }
+      table { font-size: 12px; }
+      th, td { padding: 10px 12px; }
+    }
+  </style>
+</head>
+<body>
+  <!-- Login -->
+  <div class="login-container" id="loginContainer">
+    <div class="login-card">
+      <h1>simpli.immo Admin</h1>
+      <p>Melde dich an, um das Dashboard zu verwalten.</p>
+
+      <div class="error-message" id="loginError" style="display: none;"></div>
+
+      <form id="loginForm">
+        <div class="form-group">
+          <label>E-Mail</label>
+          <input type="email" id="email" required placeholder="admin@example.com">
+        </div>
+        <div class="form-group">
+          <label>Passwort</label>
+          <input type="password" id="password" required placeholder="Passwort">
+        </div>
+        <button type="submit" class="btn btn-primary" id="loginBtn">Anmelden</button>
+      </form>
+    </div>
+  </div>
+
+  <!-- Dashboard -->
+  <div class="dashboard" id="dashboard">
+    <header class="header">
+      <h1>simpli.immo Admin Dashboard</h1>
+      <div class="header-right">
+        <span class="user-info" id="userEmail"></span>
+        <button class="logout-btn" onclick="logout()">Abmelden</button>
+      </div>
+    </header>
+
+    <main class="main-content">
+      <!-- Stats -->
+      <div class="stats-grid" id="statsGrid">
+        <div class="stat-card">
+          <div class="icon" style="background: #FFF7ED;">&#128274;</div>
+          <div class="value" id="statWhitelist">0</div>
+          <div class="label">Whitelist</div>
+        </div>
+        <div class="stat-card">
+          <div class="icon" style="background: #D1FAE5;">&#128279;</div>
+          <div class="value" id="statConnections">0</div>
+          <div class="label">Verbindungen</div>
+        </div>
+        <div class="stat-card">
+          <div class="icon" style="background: #DBEAFE;">&#128100;</div>
+          <div class="value" id="statLeads">0</div>
+          <div class="label">Leads</div>
+        </div>
+        <div class="stat-card">
+          <div class="icon" style="background: #EDE9FE;">&#128172;</div>
+          <div class="value" id="statMessages">0</div>
+          <div class="label">Nachrichten</div>
+        </div>
+      </div>
+
+      <!-- Tabs -->
+      <div class="tabs">
+        <button class="tab active" onclick="switchTab('whitelist')">Whitelist</button>
+        <button class="tab" onclick="switchTab('connections')">Verbindungen</button>
+      </div>
+
+      <!-- Whitelist Tab -->
+      <div class="tab-content active" id="tab-whitelist">
+        <div class="card">
+          <div class="card-header">
+            <h2>Freigegebene Subaccounts</h2>
+            <button class="btn btn-primary" style="width: auto; padding: 10px 20px;" onclick="openAddModal()">
+              + Hinzufugen
+            </button>
+          </div>
+          <div class="card-body">
+            <table>
+              <thead>
+                <tr>
+                  <th>Location</th>
+                  <th>Firma</th>
+                  <th>Status</th>
+                  <th>Erstellt</th>
+                  <th>Aktionen</th>
+                </tr>
+              </thead>
+              <tbody id="whitelistTable">
+                <tr><td colspan="5" class="empty-state">Laden...</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <!-- Connections Tab -->
+      <div class="tab-content" id="tab-connections">
+        <div class="card">
+          <div class="card-header">
+            <h2>Aktive Verbindungen</h2>
+          </div>
+          <div class="card-body">
+            <table>
+              <thead>
+                <tr>
+                  <th>Location</th>
+                  <th>User ID</th>
+                  <th>Status</th>
+                  <th>Letzter Sync</th>
+                  <th>Aktionen</th>
+                </tr>
+              </thead>
+              <tbody id="connectionsTable">
+                <tr><td colspan="5" class="empty-state">Laden...</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </main>
+  </div>
+
+  <!-- Add Modal -->
+  <div class="modal-overlay hidden" id="addModal">
+    <div class="modal">
+      <div class="modal-header">
+        <h3>Subaccount hinzufugen</h3>
+        <button class="modal-close" onclick="closeAddModal()">&times;</button>
+      </div>
+      <div class="modal-body">
+        <form id="addForm">
+          <div class="form-group">
+            <label>Location ID *</label>
+            <input type="text" id="addLocationId" required placeholder="z.B. tiC9FckRBUxhbaleTYma">
+          </div>
+          <div class="form-group">
+            <label>Location Name</label>
+            <input type="text" id="addLocationName" placeholder="z.B. Immobilien Muller">
+          </div>
+          <div class="form-group">
+            <label>Firmenname</label>
+            <input type="text" id="addCompanyName" placeholder="z.B. Muller Immobilien GmbH">
+          </div>
+          <div class="form-group">
+            <label>Kontakt E-Mail</label>
+            <input type="email" id="addContactEmail" placeholder="kontakt@example.com">
+          </div>
+          <div class="form-group">
+            <label>Notizen</label>
+            <textarea id="addNotes" rows="3" style="width: 100%; padding: 12px; border: 1px solid #E5E7EB; border-radius: 10px; resize: vertical;"></textarea>
+          </div>
+        </form>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" onclick="closeAddModal()">Abbrechen</button>
+        <button class="btn btn-primary" onclick="addSubaccount()">Hinzufugen</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // Supabase Config
+    const SUPABASE_URL = 'https://hsfrdovpgxtqbitmkrhs.supabase.co';
+    const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImhzZnJkb3ZwZ3h0cWJpdG1rcmhzIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjU5MjM2MjQsImV4cCI6MjA4MTQ5OTYyNH0.GQhnvrYlcCcx0qZg0-yVolu5J5aa9RwyNxW-gG4ccsk';
+
+    const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+    let currentUser = null;
+
+    // Check auth on load
+    async function checkAuth() {
+      const { data: { session } } = await supabase.auth.getSession();
+
+      if (session?.user) {
+        // Check if user is admin
+        const { data: adminData } = await supabase
+          .from('admin_users')
+          .select('role')
+          .eq('user_id', session.user.id)
+          .single();
+
+        if (adminData) {
+          currentUser = session.user;
+          showDashboard();
+          loadData();
+        } else {
+          showError('Du hast keine Admin-Berechtigung.');
+          await supabase.auth.signOut();
+        }
+      }
+    }
+
+    // Login
+    document.getElementById('loginForm').addEventListener('submit', async (e) => {
+      e.preventDefault();
+
+      const email = document.getElementById('email').value;
+      const password = document.getElementById('password').value;
+      const loginBtn = document.getElementById('loginBtn');
+
+      loginBtn.disabled = true;
+      loginBtn.textContent = 'Anmelden...';
+      hideError();
+
+      try {
+        const { data, error } = await supabase.auth.signInWithPassword({
+          email,
+          password
+        });
+
+        if (error) throw error;
+
+        // Check admin status
+        const { data: adminData, error: adminError } = await supabase
+          .from('admin_users')
+          .select('role')
+          .eq('user_id', data.user.id)
+          .single();
+
+        if (adminError || !adminData) {
+          await supabase.auth.signOut();
+          throw new Error('Du hast keine Admin-Berechtigung.');
+        }
+
+        currentUser = data.user;
+        showDashboard();
+        loadData();
+
+      } catch (err) {
+        showError(err.message);
+      } finally {
+        loginBtn.disabled = false;
+        loginBtn.textContent = 'Anmelden';
+      }
+    });
+
+    // Logout
+    async function logout() {
+      await supabase.auth.signOut();
+      currentUser = null;
+      document.getElementById('dashboard').classList.remove('active');
+      document.getElementById('loginContainer').classList.remove('hidden');
+    }
+
+    // Show/Hide
+    function showDashboard() {
+      document.getElementById('loginContainer').classList.add('hidden');
+      document.getElementById('dashboard').classList.add('active');
+      document.getElementById('userEmail').textContent = currentUser.email;
+    }
+
+    function showError(msg) {
+      const el = document.getElementById('loginError');
+      el.textContent = msg;
+      el.style.display = 'block';
+    }
+
+    function hideError() {
+      document.getElementById('loginError').style.display = 'none';
+    }
+
+    // Tab switching
+    function switchTab(tab) {
+      document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+      document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+
+      document.querySelector(`.tab[onclick="switchTab('${tab}')"]`).classList.add('active');
+      document.getElementById(`tab-${tab}`).classList.add('active');
+    }
+
+    // Load data
+    async function loadData() {
+      await Promise.all([
+        loadStats(),
+        loadWhitelist(),
+        loadConnections()
+      ]);
+    }
+
+    async function loadStats() {
+      const [whitelist, connections, leads, messages] = await Promise.all([
+        supabase.from('approved_subaccounts').select('id', { count: 'exact' }),
+        supabase.from('ghl_connections').select('id', { count: 'exact' }).eq('is_active', true),
+        supabase.from('leads').select('id', { count: 'exact' }),
+        supabase.from('messages').select('id', { count: 'exact' })
+      ]);
+
+      document.getElementById('statWhitelist').textContent = whitelist.count || 0;
+      document.getElementById('statConnections').textContent = connections.count || 0;
+      document.getElementById('statLeads').textContent = leads.count || 0;
+      document.getElementById('statMessages').textContent = messages.count || 0;
+    }
+
+    async function loadWhitelist() {
+      const { data, error } = await supabase
+        .from('approved_subaccounts')
+        .select('*')
+        .order('created_at', { ascending: false });
+
+      const tbody = document.getElementById('whitelistTable');
+
+      if (!data || data.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="5" class="empty-state"><div class="icon">&#128274;</div>Keine Subaccounts in der Whitelist</td></tr>';
+        return;
+      }
+
+      tbody.innerHTML = data.map(sub => `
+        <tr>
+          <td>
+            <strong>${sub.location_name || 'Unbenannt'}</strong><br>
+            <small style="color: #6B7280;">${sub.location_id.substring(0, 20)}...</small>
+          </td>
+          <td>${sub.company_name || '-'}</td>
+          <td>
+            <span class="badge ${sub.is_active ? 'badge-success' : 'badge-danger'}">
+              ${sub.is_active ? 'Aktiv' : 'Inaktiv'}
+            </span>
+          </td>
+          <td>${new Date(sub.created_at).toLocaleDateString('de-DE')}</td>
+          <td>
+            <div class="actions">
+              <button class="action-btn toggle" onclick="toggleSubaccount('${sub.id}', ${!sub.is_active})">
+                ${sub.is_active ? 'Deaktivieren' : 'Aktivieren'}
+              </button>
+              <button class="action-btn delete" onclick="deleteSubaccount('${sub.id}')">Loschen</button>
+            </div>
+          </td>
+        </tr>
+      `).join('');
+    }
+
+    async function loadConnections() {
+      const { data, error } = await supabase
+        .from('ghl_connections')
+        .select('*')
+        .order('created_at', { ascending: false });
+
+      const tbody = document.getElementById('connectionsTable');
+
+      if (!data || data.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="5" class="empty-state"><div class="icon">&#128279;</div>Keine Verbindungen</td></tr>';
+        return;
+      }
+
+      tbody.innerHTML = data.map(conn => `
+        <tr>
+          <td>
+            <strong>${conn.location_name || 'Unbenannt'}</strong><br>
+            <small style="color: #6B7280;">${conn.location_id}</small>
+          </td>
+          <td><small>${conn.user_id.substring(0, 8)}...</small></td>
+          <td>
+            <span class="badge ${conn.is_active ? 'badge-success' : 'badge-danger'}">
+              ${conn.is_active ? 'Aktiv' : 'Getrennt'}
+            </span>
+          </td>
+          <td>${conn.last_sync_at ? new Date(conn.last_sync_at).toLocaleString('de-DE') : '-'}</td>
+          <td>
+            ${conn.is_active ? `
+              <button class="action-btn delete" onclick="disconnectConnection('${conn.id}')">Trennen</button>
+            ` : '-'}
+          </td>
+        </tr>
+      `).join('');
+    }
+
+    // Actions
+    async function toggleSubaccount(id, isActive) {
+      await supabase
+        .from('approved_subaccounts')
+        .update({ is_active: isActive, updated_at: new Date().toISOString() })
+        .eq('id', id);
+
+      loadWhitelist();
+      loadStats();
+    }
+
+    async function deleteSubaccount(id) {
+      if (!confirm('Subaccount wirklich loschen?')) return;
+
+      await supabase
+        .from('approved_subaccounts')
+        .delete()
+        .eq('id', id);
+
+      loadWhitelist();
+      loadStats();
+    }
+
+    async function disconnectConnection(id) {
+      if (!confirm('Verbindung wirklich trennen?')) return;
+
+      await supabase
+        .from('ghl_connections')
+        .update({ is_active: false })
+        .eq('id', id);
+
+      loadConnections();
+      loadStats();
+    }
+
+    // Modal
+    function openAddModal() {
+      document.getElementById('addModal').classList.remove('hidden');
+    }
+
+    function closeAddModal() {
+      document.getElementById('addModal').classList.add('hidden');
+      document.getElementById('addForm').reset();
+    }
+
+    async function addSubaccount() {
+      const locationId = document.getElementById('addLocationId').value.trim();
+
+      if (!locationId) {
+        alert('Location ID ist erforderlich');
+        return;
+      }
+
+      const { error } = await supabase
+        .from('approved_subaccounts')
+        .insert({
+          location_id: locationId,
+          location_name: document.getElementById('addLocationName').value.trim() || null,
+          company_name: document.getElementById('addCompanyName').value.trim() || null,
+          contact_email: document.getElementById('addContactEmail').value.trim() || null,
+          notes: document.getElementById('addNotes').value.trim() || null,
+          is_active: true,
+          approved_by: currentUser.id
+        });
+
+      if (error) {
+        alert('Fehler: ' + error.message);
+        return;
+      }
+
+      closeAddModal();
+      loadWhitelist();
+      loadStats();
+    }
+
+    // Init
+    checkAuth();
+  </script>
+</body>
+</html>
