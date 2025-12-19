@@ -1459,6 +1459,87 @@
       font-weight: 600;
       margin-left: 6px;
     }
+
+    .btn-refresh-all {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 10px 20px;
+      background: #F59E0B;
+      color: white;
+      border: none;
+      border-radius: 8px;
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+    }
+
+    .btn-refresh-all:hover { background: #D97706; }
+    .btn-refresh-all:disabled { opacity: 0.5; cursor: not-allowed; }
+
+    /* Progress Modal */
+    .progress-modal {
+      display: none;
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background: rgba(0,0,0,0.7);
+      z-index: 1100;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .progress-modal.open {
+      display: flex;
+    }
+
+    .progress-modal-content {
+      background: white;
+      border-radius: 16px;
+      padding: 32px 40px;
+      text-align: center;
+      min-width: 400px;
+      box-shadow: 0 25px 50px -12px rgba(0,0,0,0.25);
+    }
+
+    .progress-modal-content h3 {
+      margin: 0 0 24px 0;
+      font-size: 20px;
+      color: #111827;
+    }
+
+    .progress-bar-container {
+      width: 100%;
+      height: 12px;
+      background: #E5E7EB;
+      border-radius: 6px;
+      overflow: hidden;
+      margin-bottom: 16px;
+    }
+
+    .progress-bar {
+      height: 100%;
+      background: linear-gradient(90deg, #8B5CF6, #6366F1);
+      border-radius: 6px;
+      width: 0%;
+      transition: width 0.3s ease;
+    }
+
+    .progress-text {
+      display: flex;
+      justify-content: space-between;
+      font-size: 14px;
+      color: #6B7280;
+      margin-bottom: 12px;
+    }
+
+    .progress-details {
+      font-size: 13px;
+      color: #9CA3AF;
+      min-height: 20px;
+    }
   </style>
 </head>
 <body>
@@ -1615,8 +1696,11 @@
           </div>
           <div class="analyse-actions">
             <span class="analyse-status" id="analyseStatus"></span>
-            <button class="btn-refresh" id="refreshBtn" onclick="refreshAnalysis()">
-              <span id="refreshBtnText">&#8635; Aktualisieren</span>
+            <button class="btn-refresh" id="refreshBtn" onclick="refreshAnalysis(false)">
+              <span id="refreshBtnText">&#8635; Neue analysieren</span>
+            </button>
+            <button class="btn-refresh-all" id="refreshAllBtn" onclick="refreshAnalysis(true)">
+              <span id="refreshAllBtnText">&#128260; Alle neu analysieren</span>
             </button>
             <button class="btn-export-small" onclick="exportLeadsCSV()">&#128190; Export</button>
           </div>
@@ -1691,6 +1775,23 @@
         </div>
       </div>
     </main>
+  </div>
+
+  <!-- Analysis Progress Modal -->
+  <div class="progress-modal" id="analysisProgressModal">
+    <div class="progress-modal-content">
+      <h3>&#129302; Analyse läuft...</h3>
+      <div class="progress-bar-container">
+        <div class="progress-bar" id="analysisProgressBar"></div>
+      </div>
+      <div class="progress-text">
+        <span id="analysisProgressText">0 von 0 Leads</span>
+        <span id="analysisProgressPercent">0%</span>
+      </div>
+      <div class="progress-details" id="analysisProgressDetails">
+        Starte Analyse...
+      </div>
+    </div>
   </div>
 
   <!-- Analyse Settings Modal -->
@@ -2828,18 +2929,73 @@
       return date.toLocaleDateString('de-DE');
     }
 
-    async function refreshAnalysis() {
+    async function refreshAnalysis(forceAll = false) {
       const btn = document.getElementById('refreshBtn');
+      const btnAll = document.getElementById('refreshAllBtn');
       const statusEl = document.getElementById('analyseStatus');
+      const progressModal = document.getElementById('analysisProgressModal');
+      const progressBar = document.getElementById('analysisProgressBar');
+      const progressText = document.getElementById('analysisProgressText');
+      const progressPercent = document.getElementById('analysisProgressPercent');
+      const progressDetails = document.getElementById('analysisProgressDetails');
 
+      // Disable both buttons
       btn.disabled = true;
-      document.getElementById('refreshBtnText').innerHTML = '&#8987; Analysiere...';
-      statusEl.textContent = 'Suche Leads mit neuen Nachrichten...';
+      btnAll.disabled = true;
+
+      if (forceAll) {
+        document.getElementById('refreshAllBtnText').innerHTML = '&#8987; Analysiere...';
+      } else {
+        document.getElementById('refreshBtnText').innerHTML = '&#8987; Analysiere...';
+      }
+
+      // Count leads to analyze
+      let leadsToAnalyze;
+      if (forceAll) {
+        leadsToAnalyze = getFilteredLeads(); // All non-archived leads
+      } else {
+        leadsToAnalyze = getFilteredLeads().filter(l =>
+          l.last_analyzed_at === null ||
+          (l.last_message_at && new Date(l.last_message_at) > new Date(l.last_analyzed_at))
+        );
+      }
+
+      const totalLeads = leadsToAnalyze.length;
+
+      if (totalLeads === 0) {
+        statusEl.textContent = forceAll ? '✅ Keine Leads zum Analysieren' : '✅ Alle Leads sind aktuell';
+        btn.disabled = false;
+        btnAll.disabled = false;
+        document.getElementById('refreshBtnText').innerHTML = '&#8635; Neue analysieren';
+        document.getElementById('refreshAllBtnText').innerHTML = '&#128260; Alle neu analysieren';
+        setTimeout(() => { statusEl.textContent = ''; }, 3000);
+        return;
+      }
+
+      // Show progress modal
+      progressModal.classList.add('open');
+      progressBar.style.width = '0%';
+      progressText.textContent = `0 von ${totalLeads} Leads`;
+      progressPercent.textContent = '0%';
+      progressDetails.textContent = forceAll ? 'Analysiere alle Leads neu...' : 'Analysiere neue Nachrichten...';
+
+      // Animate progress while waiting (fake progress up to 95%)
+      let currentProgress = 0;
+      const progressInterval = setInterval(() => {
+        if (currentProgress < 95) {
+          // Slow down as we approach 95%
+          const increment = currentProgress < 50 ? 2 : (currentProgress < 80 ? 1 : 0.3);
+          currentProgress = Math.min(95, currentProgress + increment);
+
+          const estimatedDone = Math.floor((currentProgress / 100) * totalLeads);
+          progressBar.style.width = currentProgress + '%';
+          progressText.textContent = `~${estimatedDone} von ${totalLeads} Leads`;
+          progressPercent.textContent = Math.floor(currentProgress) + '%';
+        }
+      }, 200);
 
       try {
         const { data: { session } } = await supabaseClient.auth.getSession();
-
-        // Get custom prompts
         const prompts = getAnalysePrompts();
 
         const response = await fetch(`${SUPABASE_URL}/functions/v1/sync-analyze-leads`, {
@@ -2849,30 +3005,46 @@
             'Authorization': `Bearer ${session.access_token}`
           },
           body: JSON.stringify({
-            force_all: false,
+            force_all: forceAll,
             prompts: prompts
           })
         });
 
+        clearInterval(progressInterval);
         const result = await response.json();
 
         if (result.success) {
+          // Jump to 100%
+          progressBar.style.width = '100%';
+          progressText.textContent = `${result.analyzed} von ${totalLeads} Leads`;
+          progressPercent.textContent = '100%';
+          progressDetails.textContent = '✅ Analyse abgeschlossen!';
+
           statusEl.textContent = `✅ ${result.analyzed} Leads analysiert`;
 
-          // Reload the leads data
-          await loadLeadsAnalyse();
-          await loadStats();
+          // Close modal after 1.5s
+          setTimeout(async () => {
+            progressModal.classList.remove('open');
+            await loadLeadsAnalyse();
+            await loadStats();
+          }, 1500);
 
           setTimeout(() => { statusEl.textContent = ''; }, 5000);
         } else {
+          clearInterval(progressInterval);
+          progressModal.classList.remove('open');
           statusEl.textContent = '❌ ' + result.error;
         }
       } catch (error) {
+        clearInterval(progressInterval);
+        progressModal.classList.remove('open');
         statusEl.textContent = '❌ Fehler: ' + error.message;
       }
 
       btn.disabled = false;
-      document.getElementById('refreshBtnText').innerHTML = '&#8635; Aktualisieren';
+      btnAll.disabled = false;
+      document.getElementById('refreshBtnText').innerHTML = '&#8635; Neue analysieren';
+      document.getElementById('refreshAllBtnText').innerHTML = '&#128260; Alle neu analysieren';
     }
 
     function exportLeadsCSV() {
