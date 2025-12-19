@@ -126,6 +126,7 @@ serve(async (req) => {
     }
 
     // Create new connection
+    // Note: Using 'AGENCY_KEY' as placeholder since refresh_token has NOT NULL constraint
     const { data: newConnection, error: insertError } = await supabase
       .from('ghl_connections')
       .insert({
@@ -133,8 +134,8 @@ serve(async (req) => {
         location_id: location_id,
         location_name: locationName,
         access_token: agencyKey,
-        refresh_token: null, // Agency key doesn't need refresh
-        token_expires_at: null, // Agency key doesn't expire
+        refresh_token: 'AGENCY_KEY', // Placeholder - agency keys don't need refresh
+        token_expires_at: new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toISOString(), // 1 year from now
         is_active: true,
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString()
