@@ -207,7 +207,7 @@ export default function LeadsScreen() {
         throw new Error(result.error || 'Kontakt konnte nicht erstellt werden');
       }
 
-      Alert.alert('Erfolg', 'Kontakt wurde erstellt und mit GHL synchronisiert.');
+      Alert.alert('Erfolg', 'Kontakt wurde erstellt und synchronisiert.');
       setShowCreateModal(false);
       resetCreateForm();
       loadLeads();

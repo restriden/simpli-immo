@@ -63,7 +63,7 @@ export default function KiWissenScreen() {
     }
   };
 
-  const syncToGHL = async () => {
+  const syncToCRM = async () => {
     if (!user?.id || !objektId) return;
 
     setSyncing(true);
@@ -124,8 +124,8 @@ export default function KiWissenScreen() {
         setNewFrage('');
         setNewAntwort('');
 
-        // Auto-sync to GHL after adding
-        syncToGHL();
+        // Auto-sync to CRM after adding
+        syncToCRM();
       }
     } catch (error) {
       console.error('Error creating ki-wissen:', error);
@@ -177,7 +177,7 @@ export default function KiWissenScreen() {
         <View style={styles.headerButtons}>
           <TouchableOpacity
             style={[styles.syncButton, syncing && styles.syncButtonActive]}
-            onPress={syncToGHL}
+            onPress={syncToCRM}
             disabled={syncing}
           >
             {syncing ? (

@@ -18,7 +18,7 @@ import { useRouter, useFocusEffect } from 'expo-router';
 import { Feather } from '@expo/vector-icons';
 import { useAuth } from '../../lib/auth';
 import { getTodos, getDashboardStats, Todo } from '../../lib/database';
-import { completeGHLTask, subscribeToTodos, createGHLTask, syncGHLData } from '../../lib/ghl';
+import { completeCRMTask, subscribeToTodos, createCRMTask, syncCRMData } from '../../lib/crm';
 
 const todoIcons: Record<string, { icon: string; color: string }> = {
   nachricht: { icon: 'message-circle', color: '#EF4444' },
@@ -59,7 +59,7 @@ export default function HomeScreen() {
 
     setCreating(true);
     try {
-      const result = await createGHLTask(user.id, {
+      const result = await createCRMTask(user.id, {
         title: newTaskTitle.trim(),
         description: newTaskDescription.trim() || undefined,
         type: newTaskType,
@@ -184,8 +184,8 @@ export default function HomeScreen() {
     }, 3000);
 
     try {
-      // Sync tasks from GHL (includes translation) - runs in background if needed
-      await syncGHLData(user.id, 'tasks');
+      // Sync tasks from CRM (includes translation) - runs in background if needed
+      await syncCRMData(user.id, 'tasks');
 
       // Reload local data
       await loadData();
@@ -209,7 +209,7 @@ export default function HomeScreen() {
 
       // Complete after animation delay
       setTimeout(async () => {
-        const result = await completeGHLTask(user.id, todoId, true);
+        const result = await completeCRMTask(user.id, todoId, true);
         console.log('[DASHBOARD] Complete task result:', result);
 
         if (result.success) {

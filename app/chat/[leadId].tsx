@@ -16,7 +16,7 @@ import { useRouter, useLocalSearchParams } from 'expo-router';
 import { Feather } from '@expo/vector-icons';
 import { useAuth } from '../../lib/auth';
 import { getLead, getMessages, sendMessage, Lead, Message } from '../../lib/database';
-import { sendGHLMessage, subscribeToMessages, checkGHLConnection } from '../../lib/ghl';
+import { sendCRMMessage, subscribeToMessages, checkCRMConnection } from '../../lib/crm';
 
 interface PendingQuestion {
   id: string;
@@ -48,15 +48,15 @@ export default function ChatScreen() {
   const [newMessage, setNewMessage] = useState('');
   const [loading, setLoading] = useState(true);
   const [sending, setSending] = useState(false);
-  const [ghlConnected, setGhlConnected] = useState(false);
+  const [crmConnected, setCrmConnected] = useState(false);
   const [messageType, setMessageType] = useState<'WhatsApp' | 'SMS' | 'Email'>('WhatsApp');
   const [pendingQuestions, setPendingQuestions] = useState<PendingQuestion[]>([]);
   const messageRefs = useRef<{ [key: string]: number }>({});
 
-  // Load data and check GHL connection
+  // Load data and check CRM connection
   useEffect(() => {
     loadData();
-    checkGHL();
+    checkCRM();
   }, [leadId, user?.id]);
 
   // Subscribe to real-time message updates
@@ -101,10 +101,10 @@ export default function ChatScreen() {
     };
   }, [leadId]);
 
-  const checkGHL = async () => {
+  const checkCRM = async () => {
     if (!user?.id) return;
-    const connection = await checkGHLConnection(user.id);
-    setGhlConnected(!!connection);
+    const connection = await checkCRMConnection(user.id);
+    setCrmConnected(!!connection);
   };
 
   // Detect unanswered questions from messages
@@ -171,10 +171,10 @@ export default function ChatScreen() {
     setNewMessage(''); // Clear immediately for better UX
 
     try {
-      // If GHL is connected and lead has ghl_contact_id, send via GHL
-      if (ghlConnected && lead?.ghl_contact_id) {
-        console.log('[CHAT] Sending via GHL:', messageType);
-        const result = await sendGHLMessage(user.id, leadId, messageContent, messageType);
+      // If CRM is connected and lead has ghl_contact_id, send via CRM
+      if (crmConnected && lead?.ghl_contact_id) {
+        console.log('[CHAT] Sending via CRM:', messageType);
+        const result = await sendCRMMessage(user.id, leadId, messageContent, messageType);
 
         if (!result.success) {
           Alert.alert('Fehler', result.error || 'Nachricht konnte nicht gesendet werden');
@@ -305,10 +305,10 @@ export default function ChatScreen() {
             <Feather name="credit-card" size={12} color="#6B7280" /> {lead.finanzierung_status}
           </Text>
         )}
-        {ghlConnected && lead.ghl_contact_id && (
-          <View style={styles.ghlBadge}>
+        {crmConnected && lead.ghl_contact_id && (
+          <View style={styles.crmBadge}>
             <Feather name="zap" size={12} color="#22C55E" />
-            <Text style={styles.ghlBadgeText}>GHL</Text>
+            <Text style={styles.crmBadgeText}>Sync</Text>
           </View>
         )}
       </View>
@@ -420,8 +420,8 @@ export default function ChatScreen() {
 
         {/* Input */}
         <View style={styles.inputContainer}>
-          {/* Channel Selector - only show when GHL connected */}
-          {ghlConnected && lead?.ghl_contact_id && (
+          {/* Channel Selector - only show when CRM connected */}
+          {crmConnected && lead?.ghl_contact_id && (
             <View style={styles.channelSelector}>
               <TouchableOpacity
                 style={[styles.channelButton, messageType === 'WhatsApp' && styles.channelButtonActive]}
@@ -449,7 +449,7 @@ export default function ChatScreen() {
           <View style={styles.inputWrapper}>
             <TextInput
               style={styles.textInput}
-              placeholder={ghlConnected ? `${messageType} schreiben...` : "Nachricht schreiben..."}
+              placeholder={crmConnected ? `${messageType} schreiben...` : "Nachricht schreiben..."}
               placeholderTextColor="#9CA3AF"
               value={newMessage}
               onChangeText={setNewMessage}
@@ -490,8 +490,8 @@ const styles = StyleSheet.create({
   statusBadge: { paddingHorizontal: 10, paddingVertical: 4, borderRadius: 6 },
   statusText: { fontSize: 12, fontFamily: 'DMSans-SemiBold' },
   finanzierungStatus: { fontSize: 12, fontFamily: 'DMSans-Regular', color: '#6B7280' },
-  ghlBadge: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 8, paddingVertical: 4, borderRadius: 6, backgroundColor: '#D1FAE5', marginLeft: 'auto' },
-  ghlBadgeText: { fontSize: 11, fontFamily: 'DMSans-SemiBold', color: '#22C55E' },
+  crmBadge: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 8, paddingVertical: 4, borderRadius: 6, backgroundColor: '#D1FAE5', marginLeft: 'auto' },
+  crmBadgeText: { fontSize: 11, fontFamily: 'DMSans-SemiBold', color: '#22C55E' },
   keyboardView: { flex: 1 },
   messagesContainer: { flex: 1 },
   messagesContent: { padding: 16, paddingBottom: 20 },

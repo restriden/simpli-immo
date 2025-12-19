@@ -5,101 +5,63 @@ import { useRouter, useFocusEffect } from 'expo-router';
 import { Feather } from '@expo/vector-icons';
 import { useAuth } from '../../lib/auth';
 import {
-  startGHLOAuth,
-  checkGHLConnection,
-  disconnectGHL,
-  syncGHLData,
+  checkCRMConnection,
+  disconnectCRM,
+  syncCRMData,
   formatLastSync,
-  debugGHLConnections,
-  registerGHLWebhooks,
-  GHLConnection
-} from '../../lib/ghl';
+  registerCRMWebhooks,
+  CRMConnection
+} from '../../lib/crm';
 
 export default function ProfilScreen() {
   const router = useRouter();
   const { user, profile, signOut, loading: authLoading } = useAuth();
 
-  // GHL Connection State
-  const [ghlConnection, setGhlConnection] = useState<GHLConnection | null>(null);
-  const [ghlLoading, setGhlLoading] = useState(false);
-  const [ghlConnecting, setGhlConnecting] = useState(false);
-  const [ghlSyncing, setGhlSyncing] = useState(false);
-  const [ghlRegisteringWebhooks, setGhlRegisteringWebhooks] = useState(false);
+  // CRM Connection State
+  const [crmConnection, setCrmConnection] = useState<CRMConnection | null>(null);
+  const [crmLoading, setCrmLoading] = useState(false);
+  const [crmSyncing, setCrmSyncing] = useState(false);
+  const [crmRegisteringWebhooks, setCrmRegisteringWebhooks] = useState(false);
 
-  // Load GHL connection status
-  const loadGHLStatus = async () => {
-    console.log('[PROFIL] loadGHLStatus called, user?.id:', user?.id, 'authLoading:', authLoading);
-
-    if (authLoading) {
-      console.log('[PROFIL] Auth still loading, skipping GHL check');
-      return;
-    }
-
+  // Load CRM connection status
+  const loadCRMStatus = async () => {
+    if (authLoading) return;
     if (!user?.id) {
-      console.log('[PROFIL] No user.id, not loading GHL');
-      setGhlLoading(false);
+      setCrmLoading(false);
       return;
     }
 
-    setGhlLoading(true);
+    setCrmLoading(true);
     try {
-      console.log('[PROFIL] User ID for GHL check:', user.id);
-      const connection = await checkGHLConnection(user.id);
-      console.log('[PROFIL] GHL connection result:', connection);
-      setGhlConnection(connection);
+      const connection = await checkCRMConnection(user.id);
+      setCrmConnection(connection);
     } catch (error) {
-      console.error('[PROFIL] Error loading GHL status:', error);
+      console.error('Error loading CRM status:', error);
     } finally {
-      console.log('[PROFIL] Setting ghlLoading to false');
-      setGhlLoading(false);
+      setCrmLoading(false);
     }
   };
 
   useEffect(() => {
     if (!authLoading) {
-      loadGHLStatus();
+      loadCRMStatus();
     }
   }, [user?.id, authLoading]);
 
-  // Reload on focus (after OAuth redirect)
+  // Reload on focus
   useFocusEffect(
     useCallback(() => {
       if (!authLoading && user?.id) {
-        loadGHLStatus();
+        loadCRMStatus();
       }
     }, [user?.id, authLoading])
   );
 
-  // Handle GHL Connect
-  const handleGHLConnect = async () => {
-    if (!user?.id) {
-      Alert.alert('Fehler', 'Du musst eingeloggt sein um GHL zu verbinden.');
-      return;
-    }
-
-    setGhlConnecting(true);
-    try {
-      const result = await startGHLOAuth(user.id);
-
-      if (result.success) {
-        Alert.alert('Erfolg', 'GoHighLevel wurde erfolgreich verbunden!');
-        await loadGHLStatus();
-      } else {
-        Alert.alert('Fehler', result.error || 'Verbindung fehlgeschlagen');
-      }
-    } catch (error) {
-      console.error('GHL connect error:', error);
-      Alert.alert('Fehler', 'Ein unbekannter Fehler ist aufgetreten');
-    } finally {
-      setGhlConnecting(false);
-    }
-  };
-
-  // Handle GHL Disconnect
-  const handleGHLDisconnect = () => {
+  // Handle CRM Disconnect
+  const handleCRMDisconnect = () => {
     Alert.alert(
-      'GHL trennen',
-      'Möchtest du die Verbindung zu GoHighLevel wirklich trennen? Deine synchronisierten Daten bleiben erhalten.',
+      'Verbindung trennen',
+      'Möchtest du die CRM-Verbindung wirklich trennen? Deine synchronisierten Daten bleiben erhalten.',
       [
         { text: 'Abbrechen', style: 'cancel' },
         {
@@ -107,11 +69,10 @@ export default function ProfilScreen() {
           style: 'destructive',
           onPress: async () => {
             if (!user?.id) return;
-
-            const success = await disconnectGHL(user.id);
+            const success = await disconnectCRM(user.id);
             if (success) {
-              setGhlConnection(null);
-              Alert.alert('Erfolg', 'GoHighLevel wurde getrennt.');
+              setCrmConnection(null);
+              Alert.alert('Erfolg', 'Verbindung wurde getrennt.');
             } else {
               Alert.alert('Fehler', 'Trennen fehlgeschlagen');
             }
@@ -121,56 +82,51 @@ export default function ProfilScreen() {
     );
   };
 
-  // Handle GHL Sync
-  const handleGHLSync = async () => {
+  // Handle CRM Sync
+  const handleCRMSync = async () => {
     if (!user?.id) return;
 
-    setGhlSyncing(true);
+    setCrmSyncing(true);
     try {
-      const result = await syncGHLData(user.id, 'full');
-
+      const result = await syncCRMData(user.id, 'full');
       if (result.success) {
         const userResult = result.results[user.id];
         Alert.alert(
           'Sync abgeschlossen',
-          `Kontakte: ${userResult?.contacts?.synced || 0}\nNachrichten: ${userResult?.conversations?.synced || 0}\nTermine: ${userResult?.appointments?.synced || 0}`
+          `Kontakte: ${userResult?.contacts?.synced || 0}\nNachrichten: ${userResult?.conversations?.synced || 0}`
         );
-        await loadGHLStatus();
+        await loadCRMStatus();
       } else {
         Alert.alert('Fehler', 'Sync fehlgeschlagen');
       }
     } catch (error) {
-      console.error('GHL sync error:', error);
+      console.error('CRM sync error:', error);
       Alert.alert('Fehler', 'Sync fehlgeschlagen');
     } finally {
-      setGhlSyncing(false);
+      setCrmSyncing(false);
     }
   };
 
-  // Handle GHL Webhook Registration
+  // Handle Webhook Registration
   const handleRegisterWebhooks = async () => {
     if (!user?.id) return;
 
-    setGhlRegisteringWebhooks(true);
+    setCrmRegisteringWebhooks(true);
     try {
-      const result = await registerGHLWebhooks(user.id);
-
+      const result = await registerCRMWebhooks(user.id);
       if (result.success) {
         Alert.alert(
           'Webhooks registriert',
-          `${result.webhooksRegistered} Webhooks erfolgreich registriert.\n\nEingehende Nachrichten werden jetzt automatisch synchronisiert.`
+          `${result.webhooksRegistered} Webhooks erfolgreich registriert.`
         );
       } else {
-        Alert.alert(
-          'Fehler',
-          `Webhook-Registrierung fehlgeschlagen:\n${result.errors.join('\n')}`
-        );
+        Alert.alert('Fehler', `Registrierung fehlgeschlagen:\n${result.errors.join('\n')}`);
       }
     } catch (error) {
       console.error('Webhook registration error:', error);
       Alert.alert('Fehler', 'Webhook-Registrierung fehlgeschlagen');
     } finally {
-      setGhlRegisteringWebhooks(false);
+      setCrmRegisteringWebhooks(false);
     }
   };
 
@@ -222,104 +178,88 @@ export default function ProfilScreen() {
           </View>
         </View>
 
-        {/* GoHighLevel Integration Section */}
+        {/* CRM Integration Section */}
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Integrationen</Text>
+          <Text style={styles.sectionTitle}>CRM-Verbindung</Text>
 
-          {ghlLoading ? (
-            <View style={styles.ghlCard}>
+          {crmLoading ? (
+            <View style={styles.crmCard}>
               <ActivityIndicator size="small" color="#F97316" />
             </View>
-          ) : ghlConnection ? (
+          ) : crmConnection ? (
             // Connected State
-            <View style={styles.ghlCard}>
-              <View style={styles.ghlHeader}>
-                <View style={styles.ghlIconConnected}>
+            <View style={styles.crmCard}>
+              <View style={styles.crmHeader}>
+                <View style={styles.crmIconConnected}>
                   <Feather name="link" size={20} color="#22C55E" />
                 </View>
-                <View style={styles.ghlInfo}>
-                  <View style={styles.ghlTitleRow}>
-                    <Text style={styles.ghlTitle}>GoHighLevel</Text>
-                    <View style={styles.ghlBadgeConnected}>
+                <View style={styles.crmInfo}>
+                  <View style={styles.crmTitleRow}>
+                    <Text style={styles.crmTitle}>CRM</Text>
+                    <View style={styles.crmBadgeConnected}>
                       <Feather name="check-circle" size={12} color="#22C55E" />
-                      <Text style={styles.ghlBadgeText}>Verbunden</Text>
+                      <Text style={styles.crmBadgeText}>Verbunden</Text>
                     </View>
                   </View>
-                  <Text style={styles.ghlLocation}>
-                    {ghlConnection.location_name || ghlConnection.location_id}
+                  <Text style={styles.crmLocation}>
+                    {crmConnection.location_name || 'Subaccount'}
                   </Text>
-                  <Text style={styles.ghlLastSync}>
-                    {formatLastSync(ghlConnection.last_sync_at)}
+                  <Text style={styles.crmLastSync}>
+                    {formatLastSync(crmConnection.last_sync_at)}
                   </Text>
                 </View>
               </View>
 
-              <View style={styles.ghlActions}>
+              <View style={styles.crmActions}>
                 <TouchableOpacity
-                  style={styles.ghlSyncButton}
-                  onPress={handleGHLSync}
-                  disabled={ghlSyncing}
+                  style={styles.crmSyncButton}
+                  onPress={handleCRMSync}
+                  disabled={crmSyncing}
                 >
-                  {ghlSyncing ? (
+                  {crmSyncing ? (
                     <ActivityIndicator size="small" color="#FFFFFF" />
                   ) : (
                     <>
                       <Feather name="refresh-cw" size={16} color="#FFFFFF" />
-                      <Text style={styles.ghlSyncButtonText}>Sync</Text>
+                      <Text style={styles.crmSyncButtonText}>Sync</Text>
                     </>
                   )}
                 </TouchableOpacity>
 
                 <TouchableOpacity
-                  style={styles.ghlWebhookButton}
+                  style={styles.crmWebhookButton}
                   onPress={handleRegisterWebhooks}
-                  disabled={ghlRegisteringWebhooks}
+                  disabled={crmRegisteringWebhooks}
                 >
-                  {ghlRegisteringWebhooks ? (
+                  {crmRegisteringWebhooks ? (
                     <ActivityIndicator size="small" color="#3B82F6" />
                   ) : (
                     <>
                       <Feather name="radio" size={16} color="#3B82F6" />
-                      <Text style={styles.ghlWebhookButtonText}>Webhooks</Text>
+                      <Text style={styles.crmWebhookButtonText}>Webhooks</Text>
                     </>
                   )}
                 </TouchableOpacity>
 
                 <TouchableOpacity
-                  style={styles.ghlDisconnectButton}
-                  onPress={handleGHLDisconnect}
+                  style={styles.crmDisconnectButton}
+                  onPress={handleCRMDisconnect}
                 >
                   <Feather name="x" size={16} color="#EF4444" />
                 </TouchableOpacity>
               </View>
             </View>
           ) : (
-            // Not Connected State
-            <TouchableOpacity
-              style={styles.ghlConnectCard}
-              onPress={handleGHLConnect}
-              disabled={ghlConnecting}
-            >
-              <View style={styles.ghlConnectContent}>
-                <View style={styles.ghlIconDisconnected}>
-                  <Feather name="link-2" size={24} color="#6B7280" />
-                </View>
-                <View style={styles.ghlConnectInfo}>
-                  <Text style={styles.ghlConnectTitle}>GoHighLevel verbinden</Text>
-                  <Text style={styles.ghlConnectSubtitle}>
-                    Synchronisiere Leads, Nachrichten und Termine
-                  </Text>
-                </View>
+            // Not Connected State - Auto-connect via Marketplace
+            <View style={styles.crmNotConnected}>
+              <View style={styles.crmNotConnectedIcon}>
+                <Feather name="link-2" size={24} color="#6B7280" />
               </View>
-              {ghlConnecting ? (
-                <ActivityIndicator size="small" color="#F97316" />
-              ) : (
-                <View style={styles.ghlConnectButton}>
-                  <Text style={styles.ghlConnectButtonText}>Verbinden</Text>
-                  <Feather name="arrow-right" size={16} color="#FFFFFF" />
-                </View>
-              )}
-            </TouchableOpacity>
+              <Text style={styles.crmNotConnectedTitle}>Nicht verbunden</Text>
+              <Text style={styles.crmNotConnectedText}>
+                Die Verbindung wird automatisch hergestellt, wenn die App in deinem CRM-Subaccount installiert wird.
+              </Text>
+            </View>
           )}
         </View>
 
@@ -365,21 +305,7 @@ export default function ProfilScreen() {
           <Text style={styles.signOutText}>Abmelden</Text>
         </TouchableOpacity>
 
-        <TouchableOpacity
-          onLongPress={async () => {
-            if (user?.id) {
-              const debugInfo = await debugGHLConnections(user.id);
-              Alert.alert(
-                'Debug Info',
-                `User ID: ${user.id}\n\nGHL Connections: ${debugInfo.allConnections.length}\n\nActive: ${debugInfo.activeConnection ? 'Yes' : 'No'}\n\nError: ${debugInfo.error || 'None'}`
-              );
-            } else {
-              Alert.alert('Debug Info', 'No user logged in');
-            }
-          }}
-        >
-          <Text style={styles.version}>Version 1.0.0</Text>
-        </TouchableOpacity>
+        <Text style={styles.version}>Version 1.0.0</Text>
         <View style={{ height: 100 }} />
       </ScrollView>
     </SafeAreaView>
@@ -423,31 +349,25 @@ const styles = StyleSheet.create({
   signOutText: { fontSize: 15, fontFamily: 'DMSans-SemiBold', color: '#EF4444' },
   version: { fontSize: 12, fontFamily: 'DMSans-Regular', color: '#9CA3AF', textAlign: 'center', marginTop: 8 },
 
-  // GHL Styles
-  ghlCard: { backgroundColor: '#FFFFFF', borderRadius: 16, padding: 16, borderWidth: 1, borderColor: '#D1FAE5' },
-  ghlHeader: { flexDirection: 'row', alignItems: 'flex-start' },
-  ghlIconConnected: { width: 44, height: 44, borderRadius: 12, backgroundColor: '#D1FAE5', justifyContent: 'center', alignItems: 'center' },
-  ghlInfo: { flex: 1, marginLeft: 12 },
-  ghlTitleRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  ghlTitle: { fontSize: 16, fontFamily: 'DMSans-SemiBold', color: '#111827' },
-  ghlBadgeConnected: { flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: '#D1FAE5', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 6 },
-  ghlBadgeText: { fontSize: 11, fontFamily: 'DMSans-SemiBold', color: '#22C55E' },
-  ghlLocation: { fontSize: 14, fontFamily: 'DMSans-Medium', color: '#6B7280', marginTop: 4 },
-  ghlLastSync: { fontSize: 12, fontFamily: 'DMSans-Regular', color: '#9CA3AF', marginTop: 2 },
-  ghlActions: { flexDirection: 'row', gap: 10, marginTop: 14, paddingTop: 14, borderTopWidth: 1, borderTopColor: '#F3F4F6' },
-  ghlSyncButton: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, backgroundColor: '#F97316', paddingVertical: 10, borderRadius: 10 },
-  ghlSyncButtonText: { fontSize: 14, fontFamily: 'DMSans-SemiBold', color: '#FFFFFF' },
-  ghlWebhookButton: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, backgroundColor: '#DBEAFE', paddingVertical: 10, borderRadius: 10 },
-  ghlWebhookButtonText: { fontSize: 14, fontFamily: 'DMSans-SemiBold', color: '#3B82F6' },
-  ghlDisconnectButton: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', backgroundColor: '#FEE2E2', paddingVertical: 10, paddingHorizontal: 12, borderRadius: 10 },
-  ghlDisconnectButtonText: { fontSize: 14, fontFamily: 'DMSans-SemiBold', color: '#EF4444' },
-
-  ghlConnectCard: { backgroundColor: '#FFFFFF', borderRadius: 16, padding: 16, borderWidth: 1, borderColor: '#F3F4F6' },
-  ghlConnectContent: { flexDirection: 'row', alignItems: 'center', marginBottom: 14 },
-  ghlIconDisconnected: { width: 48, height: 48, borderRadius: 12, backgroundColor: '#F3F4F6', justifyContent: 'center', alignItems: 'center' },
-  ghlConnectInfo: { flex: 1, marginLeft: 12 },
-  ghlConnectTitle: { fontSize: 16, fontFamily: 'DMSans-SemiBold', color: '#111827' },
-  ghlConnectSubtitle: { fontSize: 13, fontFamily: 'DMSans-Regular', color: '#6B7280', marginTop: 2 },
-  ghlConnectButton: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, backgroundColor: '#F97316', paddingVertical: 12, borderRadius: 10 },
-  ghlConnectButtonText: { fontSize: 15, fontFamily: 'DMSans-SemiBold', color: '#FFFFFF' },
+  // CRM Styles
+  crmCard: { backgroundColor: '#FFFFFF', borderRadius: 16, padding: 16, borderWidth: 1, borderColor: '#D1FAE5' },
+  crmHeader: { flexDirection: 'row', alignItems: 'flex-start' },
+  crmIconConnected: { width: 44, height: 44, borderRadius: 12, backgroundColor: '#D1FAE5', justifyContent: 'center', alignItems: 'center' },
+  crmInfo: { flex: 1, marginLeft: 12 },
+  crmTitleRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  crmTitle: { fontSize: 16, fontFamily: 'DMSans-SemiBold', color: '#111827' },
+  crmBadgeConnected: { flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: '#D1FAE5', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 6 },
+  crmBadgeText: { fontSize: 11, fontFamily: 'DMSans-SemiBold', color: '#22C55E' },
+  crmLocation: { fontSize: 14, fontFamily: 'DMSans-Medium', color: '#6B7280', marginTop: 4 },
+  crmLastSync: { fontSize: 12, fontFamily: 'DMSans-Regular', color: '#9CA3AF', marginTop: 2 },
+  crmActions: { flexDirection: 'row', gap: 10, marginTop: 14, paddingTop: 14, borderTopWidth: 1, borderTopColor: '#F3F4F6' },
+  crmSyncButton: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, backgroundColor: '#F97316', paddingVertical: 10, borderRadius: 10 },
+  crmSyncButtonText: { fontSize: 14, fontFamily: 'DMSans-SemiBold', color: '#FFFFFF' },
+  crmWebhookButton: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, backgroundColor: '#DBEAFE', paddingVertical: 10, borderRadius: 10 },
+  crmWebhookButtonText: { fontSize: 14, fontFamily: 'DMSans-SemiBold', color: '#3B82F6' },
+  crmDisconnectButton: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', backgroundColor: '#FEE2E2', paddingVertical: 10, paddingHorizontal: 12, borderRadius: 10 },
+  crmNotConnected: { backgroundColor: '#F9FAFB', borderRadius: 16, padding: 24, alignItems: 'center' },
+  crmNotConnectedIcon: { width: 56, height: 56, borderRadius: 14, backgroundColor: '#F3F4F6', justifyContent: 'center', alignItems: 'center', marginBottom: 12 },
+  crmNotConnectedTitle: { fontSize: 16, fontFamily: 'DMSans-SemiBold', color: '#111827', marginBottom: 4 },
+  crmNotConnectedText: { fontSize: 13, fontFamily: 'DMSans-Regular', color: '#6B7280', textAlign: 'center', lineHeight: 20 },
 });
