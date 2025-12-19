@@ -79,7 +79,7 @@ serve(async (req) => {
     const userIds = connections.map(c => c.user_id);
     let leadsQuery = supabase
       .from('leads')
-      .select('id, user_id, ghl_contact_id, first_name, last_name, email, phone, status, created_at')
+      .select('id, user_id, ghl_contact_id, name, email, phone, status, created_at')
       .in('user_id', userIds);
 
     if (dateFilter) {
@@ -99,7 +99,7 @@ serve(async (req) => {
     const leadIds = leads.map(l => l.id);
     let messagesQuery = supabase
       .from('messages')
-      .select('id, lead_id, content, direction, created_at')
+      .select('id, lead_id, content, type, created_at')
       .in('lead_id', leadIds)
       .order('created_at', { ascending: true });
 
@@ -137,7 +137,7 @@ serve(async (req) => {
 
       // Build conversation text
       const conversationText = messages.map(m => {
-        const role = m.direction === 'incoming' ? 'Kunde' : 'KI/Makler';
+        const role = m.type === 'incoming' ? 'Kunde' : 'KI/Makler';
         return `${role}: ${m.content}`;
       }).join('\n');
 
@@ -145,7 +145,7 @@ serve(async (req) => {
       let totalResponseTime = 0;
       let responseCount = 0;
       for (let i = 1; i < messages.length; i++) {
-        if (messages[i].direction === 'outgoing' && messages[i-1].direction === 'incoming') {
+        if (messages[i].type === 'outgoing' && messages[i-1].type === 'incoming') {
           const respTime = new Date(messages[i].created_at).getTime() - new Date(messages[i-1].created_at).getTime();
           totalResponseTime += respTime;
           responseCount++;
@@ -223,7 +223,7 @@ Antworte NUR mit einem JSON-Objekt in diesem Format:
 
       analyses.push({
         contact_id: lead.id,
-        contact_name: `${lead.first_name || ''} ${lead.last_name || ''}`.trim() || lead.email || 'Unbekannt',
+        contact_name: lead.name || lead.email || 'Unbekannt',
         location_name: userToLocation[lead.user_id],
         status: 'analyzed',
         ai_quality_score: analysis.ai_quality_score || 5,
