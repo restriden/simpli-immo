@@ -64,13 +64,9 @@ serve(async (req) => {
 
     const userIds = connections.map(c => c.user_id);
 
-    // First, update last_message_at for all leads
-    const { data: messageStats } = await supabase
-      .rpc('update_leads_last_message_at', { user_ids: userIds })
-      .catch(() => ({ data: null }));
-
-    // If RPC doesn't exist, do it manually
-    if (!messageStats) {
+    // First, update last_message_at for all leads manually
+    // (No RPC needed - just do it directly)
+    {
       // Get latest message per lead
       const { data: latestMessages } = await supabase
         .from('messages')
