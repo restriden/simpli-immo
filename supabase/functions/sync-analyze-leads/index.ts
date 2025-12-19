@@ -41,7 +41,29 @@ serve(async (req) => {
 
     const supabase = createClient(supabaseUrl, supabaseKey);
 
-    const { force_all = false } = await req.json().catch(() => ({}));
+    const { force_all = false, prompts = {} } = await req.json().catch(() => ({}));
+
+    // Custom prompts from dashboard settings
+    const promptStatus = prompts.promptStatus || `Bestimme den Status basierend auf:
+- unterhaltung_laeuft: Aktiver Dialog, Kunde antwortet regelmäßig
+- unterhaltung_abgebrochen: Keine Kundenantwort seit >3 Tagen
+- termin_gebucht: Kunde hat Besichtigungs-/Beratungstermin bestätigt
+- termin_angefragt: Kunde fragt nach Termin oder Rückruf
+- simpli_interessiert: Kunde zeigt Interesse an Finanzierung
+- simpli_nicht_interessiert: Kunde lehnt Finanzierung ab
+- abgeschlossen: Gespräch ist beendet (Kauf, Absage, etc.)`;
+
+    const promptScore = prompts.promptScore || `Bewerte die KI-Qualität (1-10) basierend auf:
+1. Wurden alle Fragen des Kunden vollständig beantwortet?
+2. War die KI höflich und professionell?
+3. Hat die KI aktiv versucht, einen Termin zu vereinbaren?
+4. Wurden Einwände des Kunden professionell behandelt?
+5. Wurde Simpli Finance bei Finanzierungsfragen erwähnt?`;
+
+    const promptImprovement = prompts.promptImprovement || `Gib konkrete Verbesserungsvorschläge wie:
+- "Die KI sollte aktiver nach einem Besichtigungstermin fragen"
+- "Bei Finanzierungsfragen Simpli Finance erwähnen"
+- "Schneller auf Kundenanfragen reagieren"`;
 
     // Get all active connections
     const { data: connections } = await supabase
@@ -199,26 +221,23 @@ KONTEXT:
 - Letzte Nachricht war von: ${lastMessage.type === 'incoming' ? 'Kunde' : 'KI/Makler'}
 - Anzahl Nachrichten: ${messages.length}
 
-Bestimme:
-1. Den aktuellen Status der Konversation
-2. Die Qualität der KI-Antworten (1-10)
-3. Einen konkreten Verbesserungsvorschlag für die KI
+BEWERTUNGSKRITERIEN:
+
+STATUS-BEWERTUNG:
+${promptStatus}
+
+KI-SCORE BEWERTUNG:
+${promptScore}
+
+VERBESSERUNGSVORSCHLÄGE:
+${promptImprovement}
 
 Antworte NUR mit einem JSON-Objekt:
 {
   "conversation_status": "<einer von: unterhaltung_laeuft, unterhaltung_abgebrochen, termin_gebucht, termin_angefragt, simpli_interessiert, simpli_nicht_interessiert, abgeschlossen>",
   "ai_quality_score": <1-10>,
-  "improvement_suggestion": "<Konkreter Verbesserungsvorschlag in 1-2 Sätzen, z.B. 'Die KI sollte aktiver nach einem Besichtigungstermin fragen' oder 'Die KI hat die Finanzierungsfrage nicht beantwortet - Simpli Finance erwähnen'>"
-}
-
-REGELN für conversation_status:
-- "unterhaltung_laeuft": Aktiver Dialog, Kunde antwortet
-- "unterhaltung_abgebrochen": Keine Kundenantwort seit >3 Tagen nach KI-Nachricht
-- "termin_gebucht": Kunde hat Termin bestätigt
-- "termin_angefragt": Kunde fragt nach Termin oder Rückruf
-- "simpli_interessiert": Kunde zeigt Interesse an Finanzierung
-- "simpli_nicht_interessiert": Kunde lehnt Finanzierung ab
-- "abgeschlossen": Gespräch ist beendet (Kauf, Absage, etc.)`
+  "improvement_suggestion": "<Konkreter Verbesserungsvorschlag in 1-2 Sätzen>"
+}`
           }]
         })
       });
