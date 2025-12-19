@@ -113,21 +113,24 @@ serve(async (req: Request) => {
     // Step 3: Check if location is whitelisted
     console.log("Checking whitelist for locationId:", tokenResponse.locationId);
     const { data: whitelistEntry, error: whitelistError } = await supabase
-      .from("ghl_whitelist")
+      .from("approved_subaccounts")
       .select("*")
       .eq("location_id", tokenResponse.locationId)
       .eq("is_active", true)
-      .single();
+      .maybeSingle();
 
-    if (whitelistError || !whitelistEntry) {
-      console.error("Location not whitelisted:", tokenResponse.locationId);
+    // Check expiry if set
+    const isExpired = whitelistEntry?.expires_at && new Date(whitelistEntry.expires_at) < new Date();
+
+    if (whitelistError || !whitelistEntry || isExpired) {
+      console.error("Location not whitelisted or expired:", tokenResponse.locationId);
       return redirectToApp(
         false,
-        "Dieser GHL Account ist nicht für Simpli.Immo freigeschaltet. Bitte kontaktiere den Support."
+        "Dieser Subaccount ist nicht freigeschaltet. Bitte kontaktiere den Support."
       );
     }
 
-    console.log("Location is whitelisted:", whitelistEntry);
+    console.log("Location is whitelisted:", whitelistEntry.location_name || whitelistEntry.location_id);
 
     // Step 4: Get location details from GHL
     console.log("Fetching location details...");
