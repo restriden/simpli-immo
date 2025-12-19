@@ -2023,7 +2023,7 @@
             <td>${p.company_name || '-'}</td>
             <td>${new Date(p.created_at).toLocaleDateString('de-DE')}</td>
             <td>
-              <button class="action-btn" onclick="sendConnectionLink('${p.location_id}', '${p.contact_email || ''}')">&#9993; Link senden</button>
+              <button class="action-btn toggle" onclick="connectSubaccount('${p.location_id}')">&#128279; Verbinden</button>
             </td>
           </tr>
         `).join('');
@@ -2070,13 +2070,33 @@
       alert('Location ID kopiert!');
     }
 
-    function sendConnectionLink(locationId, email) {
-      // For now, show an alert with the marketplace link
-      const marketplaceLink = 'https://marketplace.gohighlevel.com/'; // Replace with actual app link
-      if (email) {
-        alert(`Sende diesen Link an ${email}:\n\n${marketplaceLink}\n\nDer Nutzer muss die App im GHL Marketplace installieren und mit Location ID ${locationId} verbinden.`);
-      } else {
-        alert(`Marketplace Link:\n\n${marketplaceLink}\n\nLocation ID: ${locationId}\n\nKein Email hinterlegt - bitte manuell kontaktieren.`);
+    async function connectSubaccount(locationId) {
+      if (!confirm(`Subaccount ${locationId} jetzt verbinden?`)) return;
+
+      try {
+        const { data: { session } } = await supabaseClient.auth.getSession();
+
+        const response = await fetch(`${SUPABASE_URL}/functions/v1/connect-subaccount`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${session.access_token}`
+          },
+          body: JSON.stringify({ location_id: locationId })
+        });
+
+        const result = await response.json();
+
+        if (result.success) {
+          alert(`✅ ${result.message}\n\nLocation: ${result.location_name || locationId}`);
+          // Reload connections to show the new one
+          await loadConnections();
+          await loadStats();
+        } else {
+          alert('❌ Fehler: ' + result.error);
+        }
+      } catch (error) {
+        alert('❌ Verbindungsfehler: ' + error.message);
       }
     }
 
