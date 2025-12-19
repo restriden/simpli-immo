@@ -737,9 +737,13 @@
           </td>
           <td>${conn.last_sync_at ? new Date(conn.last_sync_at).toLocaleString('de-DE') : '-'}</td>
           <td>
-            ${conn.is_active ? `
-              <button class="action-btn delete" onclick="disconnectConnection('${conn.id}')">Trennen</button>
-            ` : '-'}
+            <div class="actions">
+              ${conn.is_active ? `
+                <button class="action-btn delete" onclick="disconnectConnection('${conn.id}')">Trennen</button>
+              ` : `
+                <button class="action-btn toggle" onclick="reconnectConnection('${conn.id}')">Reconnect</button>
+              `}
+            </div>
           </td>
         </tr>
       `).join('');
@@ -774,6 +778,16 @@
       await supabaseClient
         .from('ghl_connections')
         .update({ is_active: false })
+        .eq('id', id);
+
+      loadConnections();
+      loadStats();
+    }
+
+    async function reconnectConnection(id) {
+      await supabaseClient
+        .from('ghl_connections')
+        .update({ is_active: true })
         .eq('id', id);
 
       loadConnections();

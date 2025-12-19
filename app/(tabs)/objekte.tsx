@@ -15,6 +15,7 @@ import { useRouter, useFocusEffect } from 'expo-router';
 import { Feather } from '@expo/vector-icons';
 import { useAuth } from '../../lib/auth';
 import { getObjekte, mergeObjekte, Objekt } from '../../lib/database';
+import { checkCRMConnection } from '../../lib/crm';
 
 export default function ObjekteScreen() {
   const { user } = useAuth();
@@ -23,6 +24,7 @@ export default function ObjekteScreen() {
   const [objekte, setObjekte] = useState<Objekt[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [isConnected, setIsConnected] = useState<boolean | null>(null);
 
   // Merge state
   const [mergeModalVisible, setMergeModalVisible] = useState(false);
@@ -36,11 +38,22 @@ export default function ObjekteScreen() {
 
     if (!user?.id) {
       console.log('[DEBUG] loadObjekte: No user.id, returning early');
-      setLoading(false);  // FIX: Set loading to false even when no user
+      setLoading(false);
       return;
     }
 
     try {
+      // Check for active CRM connection first
+      const connection = await checkCRMConnection(user.id);
+      setIsConnected(connection !== null);
+
+      if (!connection) {
+        console.log('[DEBUG] loadObjekte: No active CRM connection');
+        setObjekte([]);
+        setLoading(false);
+        return;
+      }
+
       const data = await getObjekte(user.id);
       console.log('[DEBUG] loadObjekte: Received data:', data);
       setObjekte(data);
@@ -123,6 +136,21 @@ export default function ObjekteScreen() {
       <SafeAreaView style={styles.container} edges={['top']}>
         <View style={styles.loadingContainer}>
           <ActivityIndicator size="large" color="#F97316" />
+        </View>
+      </SafeAreaView>
+    );
+  }
+
+  if (isConnected === false) {
+    return (
+      <SafeAreaView style={styles.container} edges={['top']}>
+        <View style={styles.notConnectedContainer}>
+          <Feather name="link-2" size={64} color="#9CA3AF" />
+          <Text style={styles.notConnectedTitle}>Nicht verbunden</Text>
+          <Text style={styles.notConnectedText}>
+            Dein Konto ist derzeit nicht mit dem CRM verbunden.{'\n'}
+            Bitte kontaktiere deinen Administrator.
+          </Text>
         </View>
       </SafeAreaView>
     );
@@ -374,6 +402,9 @@ export default function ObjekteScreen() {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#FFFFFF' },
   loadingContainer: { flex: 1, justifyContent: 'center', alignItems: 'center' },
+  notConnectedContainer: { flex: 1, justifyContent: 'center', alignItems: 'center', paddingHorizontal: 40 },
+  notConnectedTitle: { fontSize: 22, fontFamily: 'DMSans-Bold', color: '#111827', marginTop: 20, marginBottom: 8 },
+  notConnectedText: { fontSize: 14, fontFamily: 'DMSans-Regular', color: '#6B7280', textAlign: 'center', lineHeight: 22 },
   header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 20, paddingVertical: 16 },
   title: { fontSize: 28, fontFamily: 'DMSans-Bold', color: '#111827' },
   headerButtons: { flexDirection: 'row', alignItems: 'center', gap: 8 },

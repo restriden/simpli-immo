@@ -18,7 +18,7 @@ import { useRouter, useFocusEffect } from 'expo-router';
 import { Feather } from '@expo/vector-icons';
 import { useAuth } from '../../lib/auth';
 import { getTodos, getDashboardStats, Todo } from '../../lib/database';
-import { completeCRMTask, subscribeToTodos, createCRMTask, syncCRMData } from '../../lib/crm';
+import { completeCRMTask, subscribeToTodos, createCRMTask, syncCRMData, checkCRMConnection } from '../../lib/crm';
 
 const todoIcons: Record<string, { icon: string; color: string }> = {
   nachricht: { icon: 'message-circle', color: '#EF4444' },
@@ -48,6 +48,7 @@ export default function HomeScreen() {
   const [creating, setCreating] = useState(false);
   const [refreshStatus, setRefreshStatus] = useState('');
   const [isSyncing, setIsSyncing] = useState(false);
+  const [isConnected, setIsConnected] = useState<boolean | null>(null);
 
   const firstName = profile?.full_name?.split(' ')[0] || 'Makler';
 
@@ -89,13 +90,25 @@ export default function HomeScreen() {
 
     if (!user?.id) {
       console.log('[DEBUG] loadData: No user.id, returning early');
-      setLoading(false);  // FIX: Set loading to false even when no user
+      setLoading(false);
       return;
     }
 
     console.log('[DEBUG] loadData: Fetching data for user.id:', user.id);
 
     try {
+      // Check for active CRM connection first
+      const connection = await checkCRMConnection(user.id);
+      setIsConnected(connection !== null);
+
+      if (!connection) {
+        console.log('[DEBUG] loadData: No active CRM connection');
+        setTodos([]);
+        setStats({ openTodos: 0, activeObjekte: 0, monthlyProvision: 0 });
+        setLoading(false);
+        return;
+      }
+
       const [todosData, statsData] = await Promise.all([
         getTodos(user.id),
         getDashboardStats(user.id),
@@ -229,6 +242,21 @@ export default function HomeScreen() {
       <SafeAreaView style={styles.container} edges={['top']}>
         <View style={styles.loadingContainer}>
           <ActivityIndicator size="large" color="#F97316" />
+        </View>
+      </SafeAreaView>
+    );
+  }
+
+  if (isConnected === false) {
+    return (
+      <SafeAreaView style={styles.container} edges={['top']}>
+        <View style={styles.notConnectedContainer}>
+          <Feather name="link-2" size={64} color="#9CA3AF" />
+          <Text style={styles.notConnectedTitle}>Nicht verbunden</Text>
+          <Text style={styles.notConnectedText}>
+            Dein Konto ist derzeit nicht mit dem CRM verbunden.{'\n'}
+            Bitte kontaktiere deinen Administrator.
+          </Text>
         </View>
       </SafeAreaView>
     );
@@ -529,6 +557,9 @@ function TodoCard({
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#FFFFFF' },
   loadingContainer: { flex: 1, justifyContent: 'center', alignItems: 'center' },
+  notConnectedContainer: { flex: 1, justifyContent: 'center', alignItems: 'center', paddingHorizontal: 40 },
+  notConnectedTitle: { fontSize: 22, fontFamily: 'DMSans-Bold', color: '#111827', marginTop: 20, marginBottom: 8 },
+  notConnectedText: { fontSize: 14, fontFamily: 'DMSans-Regular', color: '#6B7280', textAlign: 'center', lineHeight: 22 },
   header: { backgroundColor: '#F97316', paddingHorizontal: 20, paddingTop: 8, paddingBottom: 24, borderBottomLeftRadius: 24, borderBottomRightRadius: 24 },
   headerContent: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   greeting: { fontSize: 14, fontFamily: 'DMSans-Regular', color: 'rgba(255,255,255,0.8)' },

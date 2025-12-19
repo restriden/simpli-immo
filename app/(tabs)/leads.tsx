@@ -6,6 +6,7 @@ import { Feather } from '@expo/vector-icons';
 import { useAuth } from '../../lib/auth';
 import { getLeads, Lead } from '../../lib/database';
 import { supabase } from '../../lib/supabase';
+import { checkCRMConnection } from '../../lib/crm';
 
 interface Objekt {
   id: string;
@@ -38,6 +39,7 @@ export default function LeadsScreen() {
   const [objekte, setObjekte] = useState<Objekt[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [isConnected, setIsConnected] = useState<boolean | null>(null);
 
   // Create contact modal state
   const [showCreateModal, setShowCreateModal] = useState(false);
@@ -58,6 +60,16 @@ export default function LeadsScreen() {
     }
 
     try {
+      // Check for active CRM connection first
+      const connection = await checkCRMConnection(user.id);
+      setIsConnected(connection !== null);
+
+      if (!connection) {
+        setLeads([]);
+        setLoading(false);
+        return;
+      }
+
       const data = await getLeads(user.id);
       // Sort by updated_at descending (newest first)
       const sorted = data.sort((a, b) =>
@@ -230,6 +242,21 @@ export default function LeadsScreen() {
       <SafeAreaView style={styles.container} edges={['top']}>
         <View style={styles.loadingContainer}>
           <ActivityIndicator size="large" color="#F97316" />
+        </View>
+      </SafeAreaView>
+    );
+  }
+
+  if (isConnected === false) {
+    return (
+      <SafeAreaView style={styles.container} edges={['top']}>
+        <View style={styles.notConnectedContainer}>
+          <Feather name="link-2" size={64} color="#9CA3AF" />
+          <Text style={styles.notConnectedTitle}>Nicht verbunden</Text>
+          <Text style={styles.notConnectedText}>
+            Dein Konto ist derzeit nicht mit dem CRM verbunden.{'\n'}
+            Bitte kontaktiere deinen Administrator.
+          </Text>
         </View>
       </SafeAreaView>
     );
@@ -693,6 +720,26 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center'
+  },
+  notConnectedContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 40
+  },
+  notConnectedTitle: {
+    fontSize: 22,
+    fontFamily: 'DMSans-Bold',
+    color: '#111827',
+    marginTop: 20,
+    marginBottom: 8
+  },
+  notConnectedText: {
+    fontSize: 14,
+    fontFamily: 'DMSans-Regular',
+    color: '#6B7280',
+    textAlign: 'center',
+    lineHeight: 22
   },
   header: {
     flexDirection: 'row',
