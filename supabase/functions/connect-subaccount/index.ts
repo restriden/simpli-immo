@@ -159,12 +159,40 @@ serve(async (req) => {
         .eq('id', whitelist.id);
     }
 
+    // Trigger initial sync to import existing contacts/leads
+    let syncResult = null;
+    try {
+      console.log('Triggering initial sync for new connection...');
+      const syncResponse = await fetch(`${supabaseUrl}/functions/v1/ghl-sync`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${supabaseKey}` // Use service role key
+        },
+        body: JSON.stringify({
+          user_id: user.id,
+          sync_type: 'full'
+        })
+      });
+
+      if (syncResponse.ok) {
+        syncResult = await syncResponse.json();
+        console.log('Initial sync completed:', syncResult);
+      } else {
+        console.error('Sync failed:', await syncResponse.text());
+      }
+    } catch (syncError) {
+      console.error('Error triggering sync:', syncError);
+      // Don't fail the connection if sync fails
+    }
+
     return new Response(
       JSON.stringify({
         success: true,
         message: 'Subaccount erfolgreich verbunden',
         connection_id: newConnection.id,
-        location_name: locationName
+        location_name: locationName,
+        sync_result: syncResult
       }),
       { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     );

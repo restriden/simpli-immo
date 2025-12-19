@@ -2191,6 +2191,7 @@
           <td>
             <div class="actions">
               ${conn.is_active ? `
+                <button class="action-btn" onclick="syncConnection('${conn.user_id}')" title="Kontakte synchronisieren">&#128260; Sync</button>
                 <button class="action-btn delete" onclick="disconnectConnection('${conn.id}')">Trennen</button>
               ` : `
                 <button class="action-btn toggle" onclick="reconnectConnection('${conn.id}')">Reconnect</button>
@@ -2233,6 +2234,47 @@
         }
       } catch (error) {
         alert('❌ Verbindungsfehler: ' + error.message);
+      }
+    }
+
+    async function syncConnection(userId) {
+      const statusEl = document.getElementById('analyseStatus');
+      statusEl.textContent = '🔄 Synchronisiere Kontakte...';
+
+      try {
+        const { data: { session } } = await supabaseClient.auth.getSession();
+
+        const response = await fetch(`${SUPABASE_URL}/functions/v1/ghl-sync`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${session.access_token}`
+          },
+          body: JSON.stringify({
+            user_id: userId,
+            sync_type: 'full'
+          })
+        });
+
+        const result = await response.json();
+
+        if (result.success || result.connections) {
+          const contacts = result.results?.[0]?.contacts || { synced: 0, errors: 0 };
+          const conversations = result.results?.[0]?.conversations || { synced: 0, errors: 0 };
+
+          statusEl.textContent = `✅ Sync: ${contacts.synced} Kontakte, ${conversations.synced} Konversationen`;
+
+          // Reload data
+          await loadConnections();
+          await loadLeadsAnalyse();
+          await loadStats();
+
+          setTimeout(() => { statusEl.textContent = ''; }, 5000);
+        } else {
+          statusEl.textContent = '❌ Sync fehlgeschlagen: ' + (result.error || 'Unbekannt');
+        }
+      } catch (error) {
+        statusEl.textContent = '❌ Sync Fehler: ' + error.message;
       }
     }
 
