@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { View, Text, ScrollView, TouchableOpacity, StyleSheet, Alert, ActivityIndicator } from 'react-native';
+import { View, Text, ScrollView, TouchableOpacity, StyleSheet, Alert, ActivityIndicator, Modal, TextInput } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useFocusEffect } from 'expo-router';
 import { Feather } from '@expo/vector-icons';
@@ -22,6 +22,12 @@ export default function ProfilScreen() {
   const [crmLoading, setCrmLoading] = useState(false);
   const [crmSyncing, setCrmSyncing] = useState(false);
   const [crmRegisteringWebhooks, setCrmRegisteringWebhooks] = useState(false);
+
+  // Edit Modal State
+  const [showEditModal, setShowEditModal] = useState(false);
+  const [editCompanyName, setEditCompanyName] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [localCompanyName, setLocalCompanyName] = useState<string | null>(null);
 
   // Load CRM connection status
   const loadCRMStatus = async () => {
@@ -130,6 +136,51 @@ export default function ProfilScreen() {
     }
   };
 
+  // Handle Edit Company Name
+  const displayCompanyName = localCompanyName ?? profile?.company_name;
+
+  const handleOpenEdit = () => {
+    setEditCompanyName(displayCompanyName || '');
+    setShowEditModal(true);
+  };
+
+  const handleSaveCompanyName = async () => {
+    if (!user?.id || !editCompanyName.trim()) return;
+
+    setSaving(true);
+    try {
+      const response = await fetch(
+        'https://hsfrdovpgxtqbitmkrhs.supabase.co/functions/v1/update-business-name',
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            user_id: user.id,
+            business_name: editCompanyName.trim(),
+          }),
+        }
+      );
+
+      const result = await response.json();
+
+      if (result.success) {
+        // Update local state for immediate UI feedback
+        setLocalCompanyName(editCompanyName.trim());
+        Alert.alert('Erfolg', result.message);
+        setShowEditModal(false);
+        // Reload CRM connection (which may have updated name)
+        await loadCRMStatus();
+      } else {
+        Alert.alert('Fehler', result.error || 'Speichern fehlgeschlagen');
+      }
+    } catch (error) {
+      console.error('Save error:', error);
+      Alert.alert('Fehler', 'Speichern fehlgeschlagen');
+    } finally {
+      setSaving(false);
+    }
+  };
+
   const handleSignOut = () => {
     Alert.alert('Abmelden', 'Möchtest du dich wirklich abmelden?', [
       { text: 'Abbrechen', style: 'cancel' },
@@ -167,15 +218,16 @@ export default function ProfilScreen() {
 
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Unternehmen</Text>
-          <View style={styles.card}>
+          <TouchableOpacity style={styles.card} onPress={handleOpenEdit} activeOpacity={0.7}>
             <View style={styles.cardRow}>
               <View style={styles.cardIcon}><Feather name="briefcase" size={18} color="#F97316" /></View>
               <View style={styles.cardContent}>
                 <Text style={styles.cardLabel}>Firma</Text>
-                <Text style={styles.cardValue}>{profile?.company_name || 'Immobilien Köhler GmbH'}</Text>
+                <Text style={styles.cardValue}>{displayCompanyName || 'Firma eingeben...'}</Text>
               </View>
+              <Feather name="edit-2" size={16} color="#9CA3AF" />
             </View>
-          </View>
+          </TouchableOpacity>
         </View>
 
         {/* CRM Integration Section */}
@@ -308,6 +360,55 @@ export default function ProfilScreen() {
         <Text style={styles.version}>Version 1.0.0</Text>
         <View style={{ height: 100 }} />
       </ScrollView>
+
+      {/* Edit Company Name Modal */}
+      <Modal visible={showEditModal} animationType="slide" transparent>
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>Firmenname bearbeiten</Text>
+              <TouchableOpacity onPress={() => setShowEditModal(false)}>
+                <Feather name="x" size={24} color="#6B7280" />
+              </TouchableOpacity>
+            </View>
+
+            <View style={styles.modalBody}>
+              <Text style={styles.modalLabel}>Firmenname</Text>
+              <TextInput
+                style={styles.modalInput}
+                value={editCompanyName}
+                onChangeText={setEditCompanyName}
+                placeholder="z.B. Immobilien Müller GmbH"
+                placeholderTextColor="#9CA3AF"
+                autoFocus
+              />
+              <Text style={styles.modalHint}>
+                Der Name wird mit deinem CRM-Subaccount synchronisiert.
+              </Text>
+            </View>
+
+            <View style={styles.modalFooter}>
+              <TouchableOpacity
+                style={styles.modalCancelButton}
+                onPress={() => setShowEditModal(false)}
+              >
+                <Text style={styles.modalCancelText}>Abbrechen</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.modalSaveButton, saving && styles.modalSaveButtonDisabled]}
+                onPress={handleSaveCompanyName}
+                disabled={saving}
+              >
+                {saving ? (
+                  <ActivityIndicator size="small" color="#FFFFFF" />
+                ) : (
+                  <Text style={styles.modalSaveText}>Speichern</Text>
+                )}
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -371,4 +472,19 @@ const styles = StyleSheet.create({
   crmNotConnectedTitle: { fontSize: 16, fontFamily: 'DMSans-SemiBold', color: '#111827', marginBottom: 4 },
   crmNotConnectedText: { fontSize: 13, fontFamily: 'DMSans-Regular', color: '#6B7280', textAlign: 'center', lineHeight: 20 },
 
+  // Modal Styles
+  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' },
+  modalContent: { backgroundColor: '#FFFFFF', borderTopLeftRadius: 24, borderTopRightRadius: 24 },
+  modalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 20, borderBottomWidth: 1, borderBottomColor: '#F3F4F6' },
+  modalTitle: { fontSize: 18, fontFamily: 'DMSans-SemiBold', color: '#111827' },
+  modalBody: { padding: 20 },
+  modalLabel: { fontSize: 14, fontFamily: 'DMSans-SemiBold', color: '#111827', marginBottom: 8 },
+  modalInput: { backgroundColor: '#F9FAFB', borderWidth: 1, borderColor: '#E5E7EB', borderRadius: 12, paddingHorizontal: 16, paddingVertical: 14, fontSize: 16, fontFamily: 'DMSans-Regular', color: '#111827' },
+  modalHint: { fontSize: 12, fontFamily: 'DMSans-Regular', color: '#9CA3AF', marginTop: 8 },
+  modalFooter: { flexDirection: 'row', gap: 12, padding: 20, borderTopWidth: 1, borderTopColor: '#F3F4F6' },
+  modalCancelButton: { flex: 1, paddingVertical: 14, borderRadius: 12, backgroundColor: '#F3F4F6', alignItems: 'center' },
+  modalCancelText: { fontSize: 15, fontFamily: 'DMSans-SemiBold', color: '#6B7280' },
+  modalSaveButton: { flex: 1, paddingVertical: 14, borderRadius: 12, backgroundColor: '#F97316', alignItems: 'center' },
+  modalSaveButtonDisabled: { opacity: 0.6 },
+  modalSaveText: { fontSize: 15, fontFamily: 'DMSans-SemiBold', color: '#FFFFFF' },
 });
