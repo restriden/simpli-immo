@@ -1398,6 +1398,36 @@
     .btn-primary:hover {
       background: #7C3AED;
     }
+
+    .hint-text {
+      font-size: 13px;
+      color: #6B7280;
+      margin: 0 0 16px 0;
+      padding: 12px;
+      background: #FEF3C7;
+      border-radius: 8px;
+      border-left: 4px solid #F59E0B;
+    }
+
+    .card-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .btn-copy {
+      padding: 6px 12px;
+      background: #F3F4F6;
+      border: 1px solid #E5E7EB;
+      border-radius: 6px;
+      font-size: 12px;
+      cursor: pointer;
+      color: #374151;
+    }
+
+    .btn-copy:hover {
+      background: #E5E7EB;
+    }
   </style>
 </head>
 <body>
@@ -1495,9 +1525,35 @@
 
       <!-- Connections Tab -->
       <div class="tab-content" id="tab-connections">
+        <!-- Pending Connections -->
+        <div class="card" id="pendingConnectionsCard" style="display: none;">
+          <div class="card-header">
+            <h2>&#9203; Wartend auf Verbindung</h2>
+            <span class="badge badge-warning" id="pendingCount">0</span>
+          </div>
+          <div class="card-body">
+            <p class="hint-text">Diese Accounts sind in der Whitelist, aber noch nicht verbunden. Der Nutzer muss die App im GHL Marketplace installieren.</p>
+            <table>
+              <thead>
+                <tr>
+                  <th>Location Name</th>
+                  <th>Location ID</th>
+                  <th>Unternehmen</th>
+                  <th>Hinzugefügt am</th>
+                  <th>Aktionen</th>
+                </tr>
+              </thead>
+              <tbody id="pendingConnectionsTable">
+                <tr><td colspan="5" class="empty-state">Keine wartenden Verbindungen</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- Active Connections -->
         <div class="card">
           <div class="card-header">
-            <h2>Aktive Verbindungen</h2>
+            <h2>&#9989; Aktive Verbindungen</h2>
           </div>
           <div class="card-body">
             <table>
@@ -1934,19 +1990,56 @@
     }
 
     async function loadConnections() {
-      const { data, error } = await supabaseClient
-        .from('ghl_connections')
-        .select('*')
-        .order('created_at', { ascending: false });
+      // Load both connections and whitelist to find pending ones
+      const [connectionsResult, whitelistResult] = await Promise.all([
+        supabaseClient.from('ghl_connections').select('*').order('created_at', { ascending: false }),
+        supabaseClient.from('approved_subaccounts').select('*').eq('is_active', true)
+      ]);
 
+      const connections = connectionsResult.data || [];
+      const whitelist = whitelistResult.data || [];
+
+      // Find connected location_ids
+      const connectedLocationIds = new Set(connections.map(c => c.location_id));
+
+      // Find pending (whitelisted but not connected)
+      const pending = whitelist.filter(w => !connectedLocationIds.has(w.location_id));
+
+      // Render pending connections
+      const pendingCard = document.getElementById('pendingConnectionsCard');
+      const pendingTbody = document.getElementById('pendingConnectionsTable');
+      const pendingCount = document.getElementById('pendingCount');
+
+      if (pending.length > 0) {
+        pendingCard.style.display = 'block';
+        pendingCount.textContent = pending.length;
+        pendingTbody.innerHTML = pending.map(p => `
+          <tr>
+            <td><strong>${p.location_name || 'Unbenannt'}</strong></td>
+            <td>
+              <code style="font-size: 11px; background: #F3F4F6; padding: 2px 6px; border-radius: 4px;">${p.location_id}</code>
+              <button class="btn-copy" onclick="copyToClipboard('${p.location_id}')" title="Kopieren">&#128203;</button>
+            </td>
+            <td>${p.company_name || '-'}</td>
+            <td>${new Date(p.created_at).toLocaleDateString('de-DE')}</td>
+            <td>
+              <button class="action-btn" onclick="sendConnectionLink('${p.location_id}', '${p.contact_email || ''}')">&#9993; Link senden</button>
+            </td>
+          </tr>
+        `).join('');
+      } else {
+        pendingCard.style.display = 'none';
+      }
+
+      // Render active connections
       const tbody = document.getElementById('connectionsTable');
 
-      if (!data || data.length === 0) {
+      if (connections.length === 0) {
         tbody.innerHTML = '<tr><td colspan="5" class="empty-state"><div class="icon">&#128279;</div>Keine Verbindungen</td></tr>';
         return;
       }
 
-      tbody.innerHTML = data.map(conn => `
+      tbody.innerHTML = connections.map(conn => `
         <tr>
           <td>
             <strong>${conn.location_name || 'Unbenannt'}</strong><br>
@@ -1970,6 +2063,21 @@
           </td>
         </tr>
       `).join('');
+    }
+
+    function copyToClipboard(text) {
+      navigator.clipboard.writeText(text);
+      alert('Location ID kopiert!');
+    }
+
+    function sendConnectionLink(locationId, email) {
+      // For now, show an alert with the marketplace link
+      const marketplaceLink = 'https://marketplace.gohighlevel.com/'; // Replace with actual app link
+      if (email) {
+        alert(`Sende diesen Link an ${email}:\n\n${marketplaceLink}\n\nDer Nutzer muss die App im GHL Marketplace installieren und mit Location ID ${locationId} verbinden.`);
+      } else {
+        alert(`Marketplace Link:\n\n${marketplaceLink}\n\nLocation ID: ${locationId}\n\nKein Email hinterlegt - bitte manuell kontaktieren.`);
+      }
     }
 
     // Actions
