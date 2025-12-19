@@ -373,12 +373,317 @@
     .tab-content { display: none; }
     .tab-content.active { display: block; }
 
+    /* Analysis Styles */
+    .analysis-config {
+      background: white;
+      border-radius: 12px;
+      padding: 24px;
+      margin-bottom: 24px;
+    }
+
+    .analysis-config h3 {
+      font-size: 18px;
+      color: #111827;
+      margin-bottom: 16px;
+    }
+
+    .config-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 20px;
+      margin-bottom: 20px;
+    }
+
+    .config-group {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .config-group label {
+      font-size: 14px;
+      font-weight: 500;
+      color: #374151;
+    }
+
+    .config-group textarea,
+    .config-group select,
+    .config-group input {
+      padding: 12px;
+      border: 1px solid #E5E7EB;
+      border-radius: 8px;
+      font-size: 14px;
+    }
+
+    .config-group textarea {
+      resize: vertical;
+      min-height: 80px;
+    }
+
+    .config-group.full-width {
+      grid-column: 1 / -1;
+    }
+
+    .analysis-actions {
+      display: flex;
+      gap: 12px;
+      align-items: center;
+    }
+
+    .btn-analyze {
+      background: #8B5CF6;
+      color: white;
+      padding: 12px 24px;
+      border: none;
+      border-radius: 8px;
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .btn-analyze:hover { opacity: 0.9; }
+    .btn-analyze:disabled { opacity: 0.5; cursor: not-allowed; }
+
+    .btn-export {
+      background: #F3F4F6;
+      color: #374151;
+      padding: 12px 24px;
+      border: none;
+      border-radius: 8px;
+      font-size: 14px;
+      font-weight: 500;
+      cursor: pointer;
+    }
+
+    .analysis-status {
+      font-size: 14px;
+      color: #6B7280;
+    }
+
+    .results-grid {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 16px;
+      margin-bottom: 24px;
+    }
+
+    .result-card {
+      background: white;
+      border-radius: 12px;
+      padding: 20px;
+    }
+
+    .result-card .label {
+      font-size: 12px;
+      color: #6B7280;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      margin-bottom: 8px;
+    }
+
+    .result-card .value {
+      font-size: 28px;
+      font-weight: 700;
+      color: #111827;
+    }
+
+    .result-card .subvalue {
+      font-size: 14px;
+      color: #6B7280;
+      margin-top: 4px;
+    }
+
+    .goals-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 24px;
+      margin-bottom: 24px;
+    }
+
+    .goal-card {
+      background: white;
+      border-radius: 12px;
+      padding: 24px;
+    }
+
+    .goal-card h3 {
+      font-size: 16px;
+      color: #111827;
+      margin-bottom: 4px;
+    }
+
+    .goal-card .goal-name {
+      font-size: 14px;
+      color: #6B7280;
+      margin-bottom: 16px;
+    }
+
+    .goal-stats {
+      display: flex;
+      gap: 24px;
+      margin-bottom: 16px;
+    }
+
+    .goal-stat {
+      text-align: center;
+    }
+
+    .goal-stat .number {
+      font-size: 24px;
+      font-weight: 700;
+    }
+
+    .goal-stat .label {
+      font-size: 12px;
+      color: #6B7280;
+    }
+
+    .goal-stat.achieved .number { color: #059669; }
+    .goal-stat.blocked .number { color: #EF4444; }
+
+    .blockers-list {
+      background: #FEF2F2;
+      border-radius: 8px;
+      padding: 16px;
+    }
+
+    .blockers-list h4 {
+      font-size: 13px;
+      color: #EF4444;
+      margin-bottom: 12px;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .blocker-item {
+      display: flex;
+      justify-content: space-between;
+      padding: 8px 0;
+      border-bottom: 1px solid rgba(239, 68, 68, 0.1);
+      font-size: 14px;
+      color: #374151;
+    }
+
+    .blocker-item:last-child { border-bottom: none; }
+
+    .blocker-count {
+      background: #FEE2E2;
+      color: #EF4444;
+      padding: 2px 8px;
+      border-radius: 4px;
+      font-size: 12px;
+      font-weight: 600;
+    }
+
+    .faq-section {
+      background: white;
+      border-radius: 12px;
+      margin-bottom: 24px;
+    }
+
+    .faq-header {
+      padding: 20px;
+      border-bottom: 1px solid #F3F4F6;
+    }
+
+    .faq-header h3 {
+      font-size: 16px;
+      color: #111827;
+    }
+
+    .faq-table {
+      width: 100%;
+    }
+
+    .faq-table th,
+    .faq-table td {
+      text-align: left;
+      padding: 14px 20px;
+    }
+
+    .faq-frequency {
+      background: #DBEAFE;
+      color: #2563EB;
+      padding: 4px 10px;
+      border-radius: 20px;
+      font-size: 13px;
+      font-weight: 600;
+    }
+
+    .faq-category {
+      background: #F3F4F6;
+      color: #6B7280;
+      padding: 4px 10px;
+      border-radius: 6px;
+      font-size: 12px;
+    }
+
+    .contacts-section {
+      background: white;
+      border-radius: 12px;
+    }
+
+    .contacts-header {
+      padding: 20px;
+      border-bottom: 1px solid #F3F4F6;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .contacts-header h3 {
+      font-size: 16px;
+      color: #111827;
+    }
+
+    .sentiment-badge {
+      padding: 4px 10px;
+      border-radius: 6px;
+      font-size: 12px;
+      font-weight: 500;
+    }
+
+    .sentiment-positive { background: #D1FAE5; color: #059669; }
+    .sentiment-neutral { background: #F3F4F6; color: #6B7280; }
+    .sentiment-negative { background: #FEE2E2; color: #EF4444; }
+
+    .quality-score {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      font-weight: 600;
+    }
+
+    .quality-high { color: #059669; }
+    .quality-medium { color: #D97706; }
+    .quality-low { color: #EF4444; }
+
+    .spinner {
+      width: 20px;
+      height: 20px;
+      border: 2px solid rgba(255,255,255,0.3);
+      border-top-color: white;
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+    }
+
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+
     @media (max-width: 768px) {
       .header { flex-direction: column; gap: 12px; text-align: center; }
       .stats-grid { grid-template-columns: repeat(2, 1fr); }
       .tabs { flex-wrap: wrap; }
       table { font-size: 12px; }
       th, td { padding: 10px 12px; }
+      .config-grid { grid-template-columns: 1fr; }
+      .results-grid { grid-template-columns: repeat(2, 1fr); }
+      .goals-grid { grid-template-columns: 1fr; }
     }
   </style>
 </head>
@@ -444,6 +749,7 @@
       <div class="tabs">
         <button class="tab active" onclick="switchTab('whitelist')">Whitelist</button>
         <button class="tab" onclick="switchTab('connections')">Verbindungen</button>
+        <button class="tab" onclick="switchTab('analyse')">&#128202; Analyse</button>
       </div>
 
       <!-- Whitelist Tab -->
@@ -493,6 +799,164 @@
               </thead>
               <tbody id="connectionsTable">
                 <tr><td colspan="5" class="empty-state">Laden...</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <!-- Analyse Tab -->
+      <div class="tab-content" id="tab-analyse">
+        <!-- Configuration -->
+        <div class="analysis-config">
+          <h3>&#9881; Analyse-Konfiguration</h3>
+          <div class="config-grid">
+            <div class="config-group full-width">
+              <label>Analyse-Prompt (Was soll die KI bewerten?)</label>
+              <textarea id="analysisPrompt" placeholder="z.B. Bewerte ob die KI höflich war, alle Fragen beantwortet hat, und ob sie aktiv versucht hat einen Termin zu vereinbaren...">Bewerte die Qualität der KI-Antworten:
+1. Wurden alle Fragen des Kunden beantwortet?
+2. War die KI höflich und professionell?
+3. Hat die KI aktiv versucht, einen Termin zu vereinbaren?
+4. Wurden Einwände des Kunden professionell behandelt?</textarea>
+            </div>
+            <div class="config-group">
+              <label>Ziel A</label>
+              <input type="text" id="goalA" value="Termin mit Simpli Finance vereinbaren">
+            </div>
+            <div class="config-group">
+              <label>Ziel B</label>
+              <input type="text" id="goalB" value="Termin mit Makler vereinbaren oder Rückruf">
+            </div>
+            <div class="config-group">
+              <label>Zeitraum</label>
+              <select id="timeFilter">
+                <option value="7d">Letzte 7 Tage</option>
+                <option value="30d" selected>Letzte 30 Tage</option>
+                <option value="90d">Letzte 90 Tage</option>
+                <option value="all">Alle</option>
+              </select>
+            </div>
+            <div class="config-group">
+              <label>&nbsp;</label>
+              <div class="analysis-actions">
+                <button class="btn-analyze" id="analyzeBtn" onclick="startAnalysis()">
+                  <span id="analyzeBtnText">&#9654; Analyse starten</span>
+                  <div class="spinner" id="analyzeSpinner" style="display: none;"></div>
+                </button>
+                <button class="btn-export" onclick="exportResults()" id="exportBtn" style="display: none;">
+                  &#128190; CSV Export
+                </button>
+              </div>
+            </div>
+          </div>
+          <div class="analysis-status" id="analysisStatus"></div>
+        </div>
+
+        <!-- Results (hidden until analysis runs) -->
+        <div id="analysisResults" style="display: none;">
+          <!-- Summary Stats -->
+          <div class="results-grid">
+            <div class="result-card">
+              <div class="label">Analysiert</div>
+              <div class="value" id="resultTotal">0</div>
+              <div class="subvalue">Konversationen</div>
+            </div>
+            <div class="result-card">
+              <div class="label">KI-Qualität</div>
+              <div class="value" id="resultQuality">-</div>
+              <div class="subvalue">Durchschnitt (1-10)</div>
+            </div>
+            <div class="result-card">
+              <div class="label">Sentiment</div>
+              <div class="value" id="resultSentiment">-</div>
+              <div class="subvalue" id="resultSentimentDetail"></div>
+            </div>
+            <div class="result-card">
+              <div class="label">Unbeantwortete Fragen</div>
+              <div class="value" id="resultUnanswered">0</div>
+              <div class="subvalue">Wissenslücken</div>
+            </div>
+          </div>
+
+          <!-- Goals -->
+          <div class="goals-grid">
+            <div class="goal-card">
+              <h3>Ziel A</h3>
+              <div class="goal-name" id="goalAName">Termin mit Simpli Finance</div>
+              <div class="goal-stats">
+                <div class="goal-stat achieved">
+                  <div class="number" id="goalAAchieved">0</div>
+                  <div class="label">Erreicht</div>
+                </div>
+                <div class="goal-stat blocked">
+                  <div class="number" id="goalABlocked">0</div>
+                  <div class="label">Blockiert</div>
+                </div>
+              </div>
+              <div class="blockers-list" id="goalABlockers">
+                <h4>&#9888; Was hindert uns?</h4>
+                <div id="goalABlockersList">Keine Daten</div>
+              </div>
+            </div>
+            <div class="goal-card">
+              <h3>Ziel B</h3>
+              <div class="goal-name" id="goalBName">Termin mit Makler / Rückruf</div>
+              <div class="goal-stats">
+                <div class="goal-stat achieved">
+                  <div class="number" id="goalBAchieved">0</div>
+                  <div class="label">Erreicht</div>
+                </div>
+                <div class="goal-stat blocked">
+                  <div class="number" id="goalBBlocked">0</div>
+                  <div class="label">Blockiert</div>
+                </div>
+              </div>
+              <div class="blockers-list" id="goalBBlockers">
+                <h4>&#9888; Was hindert uns?</h4>
+                <div id="goalBBlockersList">Keine Daten</div>
+              </div>
+            </div>
+          </div>
+
+          <!-- FAQ Section -->
+          <div class="faq-section">
+            <div class="faq-header">
+              <h3>&#10067; Häufig gestellte Fragen (aggregiert)</h3>
+            </div>
+            <table class="faq-table">
+              <thead>
+                <tr>
+                  <th>Frage</th>
+                  <th>Kategorie</th>
+                  <th>Häufigkeit</th>
+                </tr>
+              </thead>
+              <tbody id="faqTable">
+                <tr><td colspan="3" class="empty-state">Keine Daten</td></tr>
+              </tbody>
+            </table>
+          </div>
+
+          <!-- Contacts List -->
+          <div class="contacts-section">
+            <div class="contacts-header">
+              <h3>&#128100; Analysierte Kontakte</h3>
+              <span id="contactsCount">0 Kontakte</span>
+            </div>
+            <table>
+              <thead>
+                <tr>
+                  <th>Kontakt</th>
+                  <th>Subaccount</th>
+                  <th>KI-Score</th>
+                  <th>Sentiment</th>
+                  <th>Ziel A</th>
+                  <th>Ziel B</th>
+                  <th>Nachrichten</th>
+                </tr>
+              </thead>
+              <tbody id="contactsTable">
+                <tr><td colspan="7" class="empty-state">Keine Daten</td></tr>
               </tbody>
             </table>
           </div>
@@ -832,6 +1296,219 @@
       closeAddModal();
       loadWhitelist();
       loadStats();
+    }
+
+    // ========== ANALYSIS FUNCTIONS ==========
+    let analysisData = null;
+
+    async function startAnalysis() {
+      const btn = document.getElementById('analyzeBtn');
+      const btnText = document.getElementById('analyzeBtnText');
+      const spinner = document.getElementById('analyzeSpinner');
+      const status = document.getElementById('analysisStatus');
+
+      btn.disabled = true;
+      btnText.textContent = 'Analysiere...';
+      spinner.style.display = 'block';
+      status.textContent = 'Lade Konversationen und analysiere mit KI...';
+
+      try {
+        const { data: { session } } = await supabaseClient.auth.getSession();
+
+        const response = await fetch(`${SUPABASE_URL}/functions/v1/analyze-conversations`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${session.access_token}`
+          },
+          body: JSON.stringify({
+            analysis_prompt: document.getElementById('analysisPrompt').value,
+            time_filter: document.getElementById('timeFilter').value,
+            goal_a: document.getElementById('goalA').value,
+            goal_b: document.getElementById('goalB').value
+          })
+        });
+
+        const result = await response.json();
+
+        if (!result.success) {
+          throw new Error(result.error || 'Analyse fehlgeschlagen');
+        }
+
+        analysisData = result;
+        displayResults(result);
+
+        status.textContent = `Analyse abgeschlossen: ${result.analyses?.length || 0} Konversationen analysiert.`;
+        document.getElementById('exportBtn').style.display = 'block';
+
+      } catch (error) {
+        console.error('Analysis error:', error);
+        status.textContent = 'Fehler: ' + error.message;
+      } finally {
+        btn.disabled = false;
+        btnText.textContent = '▶ Analyse starten';
+        spinner.style.display = 'none';
+      }
+    }
+
+    function displayResults(data) {
+      const resultsDiv = document.getElementById('analysisResults');
+      resultsDiv.style.display = 'block';
+
+      const summary = data.summary || {};
+      const analyses = data.analyses || [];
+      const faqs = data.faqs || [];
+
+      // Summary stats
+      document.getElementById('resultTotal').textContent = summary.total_analyzed || 0;
+      document.getElementById('resultQuality').textContent = summary.avg_quality_score || '-';
+      document.getElementById('resultUnanswered').textContent = summary.unanswered_questions_total || 0;
+
+      // Sentiment
+      const sentiment = summary.sentiment_breakdown || {};
+      const totalSent = (sentiment.positive || 0) + (sentiment.neutral || 0) + (sentiment.negative || 0);
+      if (totalSent > 0) {
+        const positivePercent = Math.round((sentiment.positive / totalSent) * 100);
+        document.getElementById('resultSentiment').textContent = positivePercent + '%';
+        document.getElementById('resultSentimentDetail').textContent =
+          `${sentiment.positive} positiv, ${sentiment.neutral} neutral, ${sentiment.negative} negativ`;
+      }
+
+      // Goal A
+      const goalA = summary.goal_a || {};
+      document.getElementById('goalAName').textContent = goalA.name || 'Ziel A';
+      document.getElementById('goalAAchieved').textContent = goalA.achieved || 0;
+      document.getElementById('goalABlocked').textContent = goalA.blocked || 0;
+
+      const goalABlockers = goalA.top_blockers || [];
+      if (goalABlockers.length > 0) {
+        document.getElementById('goalABlockersList').innerHTML = goalABlockers.map(b => `
+          <div class="blocker-item">
+            <span>${b.blocker}</span>
+            <span class="blocker-count">${b.count}x</span>
+          </div>
+        `).join('');
+      } else {
+        document.getElementById('goalABlockersList').innerHTML = '<em>Keine Blocker identifiziert</em>';
+      }
+
+      // Goal B
+      const goalB = summary.goal_b || {};
+      document.getElementById('goalBName').textContent = goalB.name || 'Ziel B';
+      document.getElementById('goalBAchieved').textContent = goalB.achieved || 0;
+      document.getElementById('goalBBlocked').textContent = goalB.blocked || 0;
+
+      const goalBBlockers = goalB.top_blockers || [];
+      if (goalBBlockers.length > 0) {
+        document.getElementById('goalBBlockersList').innerHTML = goalBBlockers.map(b => `
+          <div class="blocker-item">
+            <span>${b.blocker}</span>
+            <span class="blocker-count">${b.count}x</span>
+          </div>
+        `).join('');
+      } else {
+        document.getElementById('goalBBlockersList').innerHTML = '<em>Keine Blocker identifiziert</em>';
+      }
+
+      // FAQ Table
+      const faqTable = document.getElementById('faqTable');
+      if (faqs.length > 0) {
+        faqTable.innerHTML = faqs.slice(0, 20).map(faq => `
+          <tr>
+            <td>${faq.question}</td>
+            <td><span class="faq-category">${faq.category}</span></td>
+            <td><span class="faq-frequency">${faq.frequency}x</span></td>
+          </tr>
+        `).join('');
+      } else {
+        faqTable.innerHTML = '<tr><td colspan="3" class="empty-state">Keine Fragen gefunden</td></tr>';
+      }
+
+      // Contacts Table
+      document.getElementById('contactsCount').textContent = `${analyses.length} Kontakte`;
+      const contactsTable = document.getElementById('contactsTable');
+
+      if (analyses.length > 0) {
+        contactsTable.innerHTML = analyses.map(a => `
+          <tr>
+            <td><strong>${a.contact_name}</strong></td>
+            <td>${a.location_name}</td>
+            <td>
+              <span class="quality-score ${getQualityClass(a.ai_quality_score)}">
+                ${a.ai_quality_score}/10
+              </span>
+            </td>
+            <td><span class="sentiment-badge sentiment-${a.sentiment}">${getSentimentLabel(a.sentiment)}</span></td>
+            <td><span class="badge ${getStatusBadge(a.goal_a_status)}">${getStatusLabel(a.goal_a_status)}</span></td>
+            <td><span class="badge ${getStatusBadge(a.goal_b_status)}">${getStatusLabel(a.goal_b_status)}</span></td>
+            <td>${a.message_count}</td>
+          </tr>
+        `).join('');
+      } else {
+        contactsTable.innerHTML = '<tr><td colspan="7" class="empty-state">Keine Kontakte analysiert</td></tr>';
+      }
+    }
+
+    function getQualityClass(score) {
+      if (score >= 7) return 'quality-high';
+      if (score >= 4) return 'quality-medium';
+      return 'quality-low';
+    }
+
+    function getSentimentLabel(sentiment) {
+      const labels = { positive: 'Positiv', neutral: 'Neutral', negative: 'Negativ' };
+      return labels[sentiment] || sentiment;
+    }
+
+    function getStatusBadge(status) {
+      const badges = {
+        achieved: 'badge-success',
+        in_progress: 'badge-warning',
+        blocked: 'badge-danger',
+        not_applicable: ''
+      };
+      return badges[status] || '';
+    }
+
+    function getStatusLabel(status) {
+      const labels = {
+        achieved: 'Erreicht',
+        in_progress: 'In Arbeit',
+        blocked: 'Blockiert',
+        not_applicable: 'N/A'
+      };
+      return labels[status] || status;
+    }
+
+    function exportResults() {
+      if (!analysisData || !analysisData.analyses) {
+        alert('Keine Daten zum Exportieren');
+        return;
+      }
+
+      const analyses = analysisData.analyses;
+      const headers = ['Kontakt', 'Subaccount', 'KI-Score', 'Sentiment', 'Ziel A', 'Ziel B', 'Nachrichten', 'Zusammenfassung'];
+      const rows = analyses.map(a => [
+        a.contact_name,
+        a.location_name,
+        a.ai_quality_score,
+        a.sentiment,
+        a.goal_a_status,
+        a.goal_b_status,
+        a.message_count,
+        `"${(a.summary || '').replace(/"/g, '""')}"`
+      ]);
+
+      const csv = [headers.join(';'), ...rows.map(r => r.join(';'))].join('\n');
+      const blob = new Blob(['\ufeff' + csv], { type: 'text/csv;charset=utf-8;' });
+      const url = URL.createObjectURL(blob);
+
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `analyse_${new Date().toISOString().split('T')[0]}.csv`;
+      link.click();
+
+      URL.revokeObjectURL(url);
     }
 
     // Init
