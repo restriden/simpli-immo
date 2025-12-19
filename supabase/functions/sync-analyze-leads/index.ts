@@ -91,22 +91,27 @@ serve(async (req) => {
       }
     }
 
-    // Get leads that need analysis (new messages since last analysis)
-    let leadsQuery = supabase
+    // Get all leads for these users
+    const { data: allLeads, error: leadsError } = await supabase
       .from('leads')
       .select('id, user_id, name, email, phone, status, last_analyzed_at, last_message_at, conversation_status')
       .in('user_id', userIds);
 
-    if (!force_all) {
-      // Only get leads where last_message_at > last_analyzed_at OR never analyzed
-      leadsQuery = leadsQuery.or('last_analyzed_at.is.null,last_message_at.gt.last_analyzed_at');
-    }
-
-    const { data: leads, error: leadsError } = await leadsQuery;
-
     if (leadsError) {
       console.error('Error fetching leads:', leadsError);
       throw new Error('Failed to fetch leads: ' + leadsError.message);
+    }
+
+    // Filter leads that need analysis (in JS since Supabase can't compare columns)
+    let leads = allLeads || [];
+    if (!force_all) {
+      leads = leads.filter(lead => {
+        // Never analyzed
+        if (!lead.last_analyzed_at) return true;
+        // Has new messages since last analysis
+        if (lead.last_message_at && new Date(lead.last_message_at) > new Date(lead.last_analyzed_at)) return true;
+        return false;
+      });
     }
 
     if (!leads || leads.length === 0) {
