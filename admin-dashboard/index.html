@@ -907,6 +907,175 @@
 
     .sync-button:hover { background: #059669; }
     .sync-button:disabled { opacity: 0.5; cursor: not-allowed; }
+
+    /* Analyse Tab Styles */
+    .analyse-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      margin-bottom: 24px;
+      flex-wrap: wrap;
+      gap: 16px;
+    }
+
+    .analyse-title h2 {
+      font-size: 24px;
+      color: #111827;
+      margin: 0 0 4px 0;
+    }
+
+    .analyse-subtitle {
+      font-size: 14px;
+      color: #6B7280;
+      margin: 0;
+    }
+
+    .analyse-actions {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .analyse-status {
+      font-size: 13px;
+      color: #6B7280;
+    }
+
+    .btn-refresh {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 10px 20px;
+      background: #8B5CF6;
+      color: white;
+      border: none;
+      border-radius: 8px;
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+    }
+
+    .btn-refresh:hover { background: #7C3AED; }
+    .btn-refresh:disabled { opacity: 0.5; cursor: not-allowed; }
+
+    .btn-export-small {
+      padding: 10px 16px;
+      background: #F3F4F6;
+      color: #374151;
+      border: none;
+      border-radius: 8px;
+      font-size: 14px;
+      cursor: pointer;
+    }
+
+    .btn-export-small:hover { background: #E5E7EB; }
+
+    .status-filter {
+      display: flex;
+      gap: 8px;
+      margin-bottom: 16px;
+      flex-wrap: wrap;
+    }
+
+    .filter-btn {
+      padding: 8px 16px;
+      background: white;
+      border: 1px solid #E5E7EB;
+      border-radius: 20px;
+      font-size: 13px;
+      cursor: pointer;
+      color: #6B7280;
+      transition: all 0.2s;
+    }
+
+    .filter-btn:hover {
+      border-color: #8B5CF6;
+      color: #8B5CF6;
+    }
+
+    .filter-btn.active {
+      background: #8B5CF6;
+      color: white;
+      border-color: #8B5CF6;
+    }
+
+    .status-badge {
+      display: inline-block;
+      padding: 4px 10px;
+      border-radius: 12px;
+      font-size: 12px;
+      font-weight: 500;
+    }
+
+    .status-unterhaltung_laeuft { background: #D1FAE5; color: #059669; }
+    .status-unterhaltung_abgebrochen { background: #FEE2E2; color: #EF4444; }
+    .status-termin_gebucht { background: #DBEAFE; color: #2563EB; }
+    .status-termin_angefragt { background: #FEF3C7; color: #D97706; }
+    .status-simpli_interessiert { background: #EDE9FE; color: #7C3AED; }
+    .status-simpli_nicht_interessiert { background: #F3F4F6; color: #6B7280; }
+    .status-abgeschlossen { background: #F3F4F6; color: #374151; }
+
+    .score-badge {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 36px;
+      height: 36px;
+      border-radius: 8px;
+      font-weight: 700;
+      font-size: 14px;
+    }
+
+    .score-high { background: #D1FAE5; color: #059669; }
+    .score-medium { background: #FEF3C7; color: #D97706; }
+    .score-low { background: #FEE2E2; color: #EF4444; }
+    .score-none { background: #F3F4F6; color: #9CA3AF; }
+
+    .suggestion-text {
+      font-size: 13px;
+      color: #374151;
+      max-width: 300px;
+    }
+
+    .date-text {
+      font-size: 12px;
+      color: #6B7280;
+    }
+
+    .new-badge {
+      display: inline-block;
+      padding: 2px 6px;
+      background: #FEF3C7;
+      color: #D97706;
+      border-radius: 4px;
+      font-size: 10px;
+      font-weight: 600;
+      margin-left: 6px;
+    }
+
+    .subaccount-select {
+      padding: 8px 16px;
+      border: 1px solid #E5E7EB;
+      border-radius: 20px;
+      font-size: 13px;
+      color: #374151;
+      background: white;
+      cursor: pointer;
+      margin-left: auto;
+    }
+
+    .subaccount-select:focus {
+      outline: none;
+      border-color: #8B5CF6;
+    }
+
+    #tab-analyse table {
+      font-size: 14px;
+    }
+
+    #tab-analyse table th {
+      white-space: nowrap;
+    }
   </style>
 </head>
 <body>
@@ -1029,156 +1198,72 @@
 
       <!-- Analyse Tab -->
       <div class="tab-content" id="tab-analyse">
-        <!-- Configuration -->
-        <div class="analysis-config">
-          <h3>&#9881; Analyse-Konfiguration</h3>
-          <div class="config-grid">
-            <div class="config-group full-width">
-              <label>Analyse-Prompt (Was soll die KI bewerten?)</label>
-              <textarea id="analysisPrompt" placeholder="z.B. Bewerte ob die KI höflich war, alle Fragen beantwortet hat, und ob sie aktiv versucht hat einen Termin zu vereinbaren...">Bewerte die Qualität der KI-Antworten:
-1. Wurden alle Fragen des Kunden beantwortet?
-2. War die KI höflich und professionell?
-3. Hat die KI aktiv versucht, einen Termin zu vereinbaren?
-4. Wurden Einwände des Kunden professionell behandelt?</textarea>
-            </div>
-            <div class="config-group">
-              <label>Ziel A</label>
-              <input type="text" id="goalA" value="Termin mit Simpli Finance vereinbaren">
-            </div>
-            <div class="config-group">
-              <label>Ziel B</label>
-              <input type="text" id="goalB" value="Termin mit Makler vereinbaren oder Rückruf">
-            </div>
-            <div class="config-group">
-              <label>Zeitraum</label>
-              <select id="timeFilter">
-                <option value="7d">Letzte 7 Tage</option>
-                <option value="30d" selected>Letzte 30 Tage</option>
-                <option value="90d">Letzte 90 Tage</option>
-                <option value="all">Alle</option>
-              </select>
-            </div>
-            <div class="config-group">
-              <label>&nbsp;</label>
-              <div class="analysis-actions">
-                <button class="btn-analyze" id="analyzeBtn" onclick="startAnalysis()">
-                  <span id="analyzeBtnText">&#9654; Analyse starten</span>
-                  <div class="spinner" id="analyzeSpinner" style="display: none;"></div>
-                </button>
-                <button class="btn-export" onclick="exportResults()" id="exportBtn" style="display: none;">
-                  &#128190; CSV Export
-                </button>
-              </div>
-            </div>
+        <!-- Header with Refresh Button -->
+        <div class="analyse-header">
+          <div class="analyse-title">
+            <h2>&#128202; Lead-Analyse</h2>
+            <p class="analyse-subtitle">Alle Leads werden automatisch angelegt. Klicke "Aktualisieren" um Leads mit neuen Nachrichten neu zu analysieren.</p>
           </div>
-          <div class="analysis-status" id="analysisStatus"></div>
+          <div class="analyse-actions">
+            <span class="analyse-status" id="analyseStatus"></span>
+            <button class="btn-refresh" id="refreshBtn" onclick="refreshAnalysis()">
+              <span id="refreshBtnText">&#8635; Aktualisieren</span>
+            </button>
+            <button class="btn-export-small" onclick="exportLeadsCSV()">&#128190; Export</button>
+          </div>
         </div>
 
-        <!-- Results (hidden until analysis runs) -->
-        <div id="analysisResults" style="display: none;">
-          <!-- Summary Stats -->
-          <div class="results-grid">
-            <div class="result-card">
-              <div class="label">Analysiert</div>
-              <div class="value" id="resultTotal">0</div>
-              <div class="subvalue">Konversationen</div>
-            </div>
-            <div class="result-card">
-              <div class="label">KI-Qualität</div>
-              <div class="value" id="resultQuality">-</div>
-              <div class="subvalue">Durchschnitt (1-10)</div>
-            </div>
-            <div class="result-card">
-              <div class="label">Sentiment</div>
-              <div class="value" id="resultSentiment">-</div>
-              <div class="subvalue" id="resultSentimentDetail"></div>
-            </div>
-            <div class="result-card">
-              <div class="label">Unbeantwortete Fragen</div>
-              <div class="value" id="resultUnanswered">0</div>
-              <div class="subvalue">Wissenslücken</div>
-            </div>
+        <!-- Summary Stats -->
+        <div class="results-grid">
+          <div class="result-card">
+            <div class="label">Gesamt Leads</div>
+            <div class="value" id="analyseTotal">-</div>
+            <div class="subvalue">Alle Subaccounts</div>
           </div>
-
-          <!-- Goals -->
-          <div class="goals-grid">
-            <div class="goal-card">
-              <h3>Ziel A</h3>
-              <div class="goal-name" id="goalAName">Termin mit Simpli Finance</div>
-              <div class="goal-stats">
-                <div class="goal-stat achieved">
-                  <div class="number" id="goalAAchieved">0</div>
-                  <div class="label">Erreicht</div>
-                </div>
-                <div class="goal-stat blocked">
-                  <div class="number" id="goalABlocked">0</div>
-                  <div class="label">Blockiert</div>
-                </div>
-              </div>
-              <div class="blockers-list" id="goalABlockers">
-                <h4>&#9888; Was hindert uns?</h4>
-                <div id="goalABlockersList">Keine Daten</div>
-              </div>
-            </div>
-            <div class="goal-card">
-              <h3>Ziel B</h3>
-              <div class="goal-name" id="goalBName">Termin mit Makler / Rückruf</div>
-              <div class="goal-stats">
-                <div class="goal-stat achieved">
-                  <div class="number" id="goalBAchieved">0</div>
-                  <div class="label">Erreicht</div>
-                </div>
-                <div class="goal-stat blocked">
-                  <div class="number" id="goalBBlocked">0</div>
-                  <div class="label">Blockiert</div>
-                </div>
-              </div>
-              <div class="blockers-list" id="goalBBlockers">
-                <h4>&#9888; Was hindert uns?</h4>
-                <div id="goalBBlockersList">Keine Daten</div>
-              </div>
-            </div>
+          <div class="result-card">
+            <div class="label">KI-Qualität</div>
+            <div class="value" id="analyseQuality">-</div>
+            <div class="subvalue">Durchschnitt (1-10)</div>
           </div>
-
-          <!-- FAQ Section -->
-          <div class="faq-section">
-            <div class="faq-header">
-              <h3>&#10067; Häufig gestellte Fragen (aggregiert)</h3>
-            </div>
-            <table class="faq-table">
-              <thead>
-                <tr>
-                  <th>Frage</th>
-                  <th>Kategorie</th>
-                  <th>Häufigkeit</th>
-                </tr>
-              </thead>
-              <tbody id="faqTable">
-                <tr><td colspan="3" class="empty-state">Keine Daten</td></tr>
-              </tbody>
-            </table>
+          <div class="result-card">
+            <div class="label">Brauchen Aufmerksamkeit</div>
+            <div class="value" id="analyseAttention">-</div>
+            <div class="subvalue">Abgebrochen oder Score &lt;5</div>
           </div>
+          <div class="result-card">
+            <div class="label">Noch nicht analysiert</div>
+            <div class="value" id="analyseNotAnalyzed">-</div>
+            <div class="subvalue">Neue Nachrichten</div>
+          </div>
+        </div>
 
-          <!-- Contacts List -->
-          <div class="contacts-section">
-            <div class="contacts-header">
-              <h3>&#128100; Analysierte Kontakte</h3>
-              <span id="contactsCount">0 Kontakte</span>
-            </div>
+        <!-- Status Filter -->
+        <div class="status-filter">
+          <button class="filter-btn active" onclick="filterLeads('alle')">Alle</button>
+          <button class="filter-btn" onclick="filterLeads('unterhaltung_laeuft')">&#128994; Läuft</button>
+          <button class="filter-btn" onclick="filterLeads('unterhaltung_abgebrochen')">&#128308; Abgebrochen</button>
+          <button class="filter-btn" onclick="filterLeads('termin_gebucht')">&#9989; Termin</button>
+          <button class="filter-btn" onclick="filterLeads('simpli_interessiert')">&#128176; Simpli</button>
+          <button class="filter-btn" onclick="filterLeads('attention')">&#9888; Aufmerksamkeit</button>
+        </div>
+
+        <!-- Leads Table -->
+        <div class="card">
+          <div class="card-body">
             <table>
               <thead>
                 <tr>
-                  <th>Kontakt</th>
-                  <th>Subaccount</th>
+                  <th>Lead</th>
+                  <th>Makler</th>
+                  <th>Status</th>
                   <th>KI-Score</th>
-                  <th>Sentiment</th>
-                  <th>Ziel A</th>
-                  <th>Ziel B</th>
-                  <th>Nachrichten</th>
+                  <th>Verbesserungsvorschlag</th>
+                  <th>Letzte Nachricht</th>
+                  <th>Analysiert</th>
                 </tr>
               </thead>
-              <tbody id="contactsTable">
-                <tr><td colspan="7" class="empty-state">Keine Daten</td></tr>
+              <tbody id="leadsAnalyseTable">
+                <tr><td colspan="7" class="empty-state">Laden...</td></tr>
               </tbody>
             </table>
           </div>
@@ -1937,6 +2022,272 @@
     showDashboard = function() {
       originalShowDashboard();
       showChatFab();
+    };
+
+    // ========== LEADS ANALYSE FUNCTIONS ==========
+    let allLeadsData = [];
+    let allSubaccounts = [];
+    let currentFilter = 'alle';
+    let currentSubaccountFilter = 'alle';
+
+    async function loadLeadsAnalyse() {
+      try {
+        // Load all leads
+        const { data: leads, error: leadsError } = await supabaseClient
+          .from('leads')
+          .select('id, name, email, phone, status, created_at, user_id, conversation_status, ai_quality_score, ai_improvement_suggestion, last_message_at, last_analyzed_at')
+          .order('last_message_at', { ascending: false, nullsFirst: false });
+
+        if (leadsError) throw leadsError;
+
+        // Load all connections to get location info
+        const { data: connections, error: connError } = await supabaseClient
+          .from('ghl_connections')
+          .select('user_id, location_id, location_name')
+          .eq('is_active', true);
+
+        if (connError) throw connError;
+
+        // Create lookup map
+        const connectionMap = new Map();
+        (connections || []).forEach(c => {
+          connectionMap.set(c.user_id, c);
+        });
+
+        // Merge leads with connection info
+        allLeadsData = (leads || []).map(lead => ({
+          ...lead,
+          ghl_connections: connectionMap.get(lead.user_id) || null
+        }));
+
+        // Extract unique subaccounts
+        const subaccountMap = new Map();
+        allLeadsData.forEach(l => {
+          if (l.ghl_connections) {
+            subaccountMap.set(l.ghl_connections.location_id, l.ghl_connections.location_name);
+          }
+        });
+        allSubaccounts = Array.from(subaccountMap, ([id, name]) => ({ id, name }));
+
+        updateSubaccountFilter();
+        updateAnalyseStats();
+        renderLeadsTable();
+      } catch (error) {
+        console.error('Error loading leads:', error);
+        document.getElementById('leadsAnalyseTable').innerHTML =
+          `<tr><td colspan="7" class="empty-state">Fehler: ${error.message}</td></tr>`;
+      }
+    }
+
+    function updateSubaccountFilter() {
+      const filterDiv = document.querySelector('.status-filter');
+      const subaccountSelect = document.getElementById('subaccountSelect');
+
+      // Add subaccount dropdown if not exists
+      if (!subaccountSelect && allSubaccounts.length > 1) {
+        const select = document.createElement('select');
+        select.id = 'subaccountSelect';
+        select.className = 'subaccount-select';
+        select.innerHTML = `<option value="alle">Alle Makler</option>` +
+          allSubaccounts.map(s => `<option value="${s.id}">${s.name}</option>`).join('');
+        select.onchange = (e) => {
+          currentSubaccountFilter = e.target.value;
+          renderLeadsTable();
+        };
+        filterDiv.appendChild(select);
+      }
+    }
+
+    function updateAnalyseStats() {
+      const total = allLeadsData.length;
+      const withScore = allLeadsData.filter(l => l.ai_quality_score !== null);
+      const avgQuality = withScore.length > 0
+        ? (withScore.reduce((sum, l) => sum + l.ai_quality_score, 0) / withScore.length).toFixed(1)
+        : '-';
+
+      const needsAttention = allLeadsData.filter(l =>
+        l.conversation_status === 'unterhaltung_abgebrochen' ||
+        (l.ai_quality_score !== null && l.ai_quality_score < 5)
+      ).length;
+
+      const notAnalyzed = allLeadsData.filter(l =>
+        l.last_analyzed_at === null ||
+        (l.last_message_at && new Date(l.last_message_at) > new Date(l.last_analyzed_at))
+      ).length;
+
+      document.getElementById('analyseTotal').textContent = total;
+      document.getElementById('analyseQuality').textContent = avgQuality;
+      document.getElementById('analyseAttention').textContent = needsAttention;
+      document.getElementById('analyseNotAnalyzed').textContent = notAnalyzed;
+    }
+
+    function filterLeads(filter) {
+      currentFilter = filter;
+
+      // Update filter buttons
+      document.querySelectorAll('.filter-btn').forEach(btn => btn.classList.remove('active'));
+      event.target.classList.add('active');
+
+      renderLeadsTable();
+    }
+
+    function renderLeadsTable() {
+      let filteredLeads = allLeadsData;
+
+      // Apply subaccount filter
+      if (currentSubaccountFilter !== 'alle') {
+        filteredLeads = filteredLeads.filter(l =>
+          l.ghl_connections?.location_id === currentSubaccountFilter
+        );
+      }
+
+      // Apply status filter
+      if (currentFilter === 'attention') {
+        filteredLeads = filteredLeads.filter(l =>
+          l.conversation_status === 'unterhaltung_abgebrochen' ||
+          (l.ai_quality_score !== null && l.ai_quality_score < 5)
+        );
+      } else if (currentFilter !== 'alle') {
+        filteredLeads = filteredLeads.filter(l => l.conversation_status === currentFilter);
+      }
+
+      const tbody = document.getElementById('leadsAnalyseTable');
+
+      if (filteredLeads.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="7" class="empty-state">Keine Leads gefunden</td></tr>';
+        return;
+      }
+
+      tbody.innerHTML = filteredLeads.map(lead => {
+        const status = lead.conversation_status || 'unterhaltung_laeuft';
+        const score = lead.ai_quality_score;
+        const scoreClass = score === null ? 'score-none' :
+          score >= 7 ? 'score-high' : score >= 4 ? 'score-medium' : 'score-low';
+
+        const hasNewMessages = lead.last_message_at &&
+          (!lead.last_analyzed_at || new Date(lead.last_message_at) > new Date(lead.last_analyzed_at));
+
+        return `
+          <tr>
+            <td>
+              <strong>${escapeHtml(lead.name || 'Unbekannt')}</strong>
+              ${hasNewMessages ? '<span class="new-badge">NEU</span>' : ''}
+              <br><small style="color: #6B7280;">${lead.email || lead.phone || '-'}</small>
+            </td>
+            <td>${lead.ghl_connections?.location_name || '-'}</td>
+            <td><span class="status-badge status-${status}">${getStatusText(status)}</span></td>
+            <td><span class="score-badge ${scoreClass}">${score !== null ? score : '-'}</span></td>
+            <td class="suggestion-text">${escapeHtml(lead.ai_improvement_suggestion || '-')}</td>
+            <td class="date-text">${formatDate(lead.last_message_at)}</td>
+            <td class="date-text">${formatDate(lead.last_analyzed_at)}</td>
+          </tr>
+        `;
+      }).join('');
+    }
+
+    function getStatusText(status) {
+      const statusLabels = {
+        'unterhaltung_laeuft': 'Läuft',
+        'unterhaltung_abgebrochen': 'Abgebrochen',
+        'termin_gebucht': 'Termin gebucht',
+        'termin_angefragt': 'Termin angefragt',
+        'simpli_interessiert': 'Simpli interessiert',
+        'simpli_nicht_interessiert': 'Simpli nicht interessiert',
+        'abgeschlossen': 'Abgeschlossen'
+      };
+      return statusLabels[status] || status;
+    }
+
+    function formatDate(dateStr) {
+      if (!dateStr) return '-';
+      const date = new Date(dateStr);
+      const now = new Date();
+      const diff = now - date;
+
+      if (diff < 3600000) return 'Vor ' + Math.round(diff / 60000) + ' Min';
+      if (diff < 86400000) return 'Vor ' + Math.round(diff / 3600000) + ' Std';
+      if (diff < 604800000) return 'Vor ' + Math.round(diff / 86400000) + ' Tagen';
+
+      return date.toLocaleDateString('de-DE');
+    }
+
+    async function refreshAnalysis() {
+      const btn = document.getElementById('refreshBtn');
+      const statusEl = document.getElementById('analyseStatus');
+
+      btn.disabled = true;
+      document.getElementById('refreshBtnText').innerHTML = '&#8987; Analysiere...';
+      statusEl.textContent = 'Suche Leads mit neuen Nachrichten...';
+
+      try {
+        const { data: { session } } = await supabaseClient.auth.getSession();
+
+        const response = await fetch(`${SUPABASE_URL}/functions/v1/sync-analyze-leads`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${session.access_token}`
+          },
+          body: JSON.stringify({ force_all: false })
+        });
+
+        const result = await response.json();
+
+        if (result.success) {
+          statusEl.textContent = `✅ ${result.analyzed} Leads analysiert`;
+
+          // Reload the leads data
+          await loadLeadsAnalyse();
+          await loadStats();
+
+          setTimeout(() => { statusEl.textContent = ''; }, 5000);
+        } else {
+          statusEl.textContent = '❌ ' + result.error;
+        }
+      } catch (error) {
+        statusEl.textContent = '❌ Fehler: ' + error.message;
+      }
+
+      btn.disabled = false;
+      document.getElementById('refreshBtnText').innerHTML = '&#8635; Aktualisieren';
+    }
+
+    function exportLeadsCSV() {
+      if (allLeadsData.length === 0) {
+        alert('Keine Daten zum Exportieren');
+        return;
+      }
+
+      const headers = ['Lead', 'Email', 'Telefon', 'Makler', 'Status', 'KI-Score', 'Verbesserung', 'Letzte Nachricht', 'Analysiert'];
+      const rows = allLeadsData.map(l => [
+        l.name || 'Unbekannt',
+        l.email || '',
+        l.phone || '',
+        l.ghl_connections?.location_name || '',
+        getStatusText(l.conversation_status || 'unterhaltung_laeuft'),
+        l.ai_quality_score !== null ? l.ai_quality_score : '',
+        `"${(l.ai_improvement_suggestion || '').replace(/"/g, '""')}"`,
+        l.last_message_at ? new Date(l.last_message_at).toLocaleString('de-DE') : '',
+        l.last_analyzed_at ? new Date(l.last_analyzed_at).toLocaleString('de-DE') : ''
+      ]);
+
+      const csv = [headers.join(';'), ...rows.map(r => r.join(';'))].join('\n');
+      const blob = new Blob(['\ufeff' + csv], { type: 'text/csv;charset=utf-8;' });
+      const url = URL.createObjectURL(blob);
+
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `leads_analyse_${new Date().toISOString().split('T')[0]}.csv`;
+      link.click();
+
+      URL.revokeObjectURL(url);
+    }
+
+    // Update loadData to include leads analyse
+    const originalLoadData = loadData;
+    loadData = async function() {
+      await originalLoadData();
+      await loadLeadsAnalyse();
     };
 
     // Init
