@@ -131,6 +131,12 @@ async function ensureValidToken(
   supabase: any,
   connection: GHLConnection
 ): Promise<GHLConnection> {
+  // Skip token refresh for agency key connections
+  if (connection.refresh_token === 'AGENCY_KEY' || !connection.refresh_token || !connection.token_expires_at) {
+    console.log(`Using agency key for user ${connection.user_id} - no refresh needed`);
+    return connection;
+  }
+
   const expiresAt = new Date(connection.token_expires_at);
   const now = new Date();
 

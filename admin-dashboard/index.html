@@ -2191,7 +2191,7 @@
           <td>
             <div class="actions">
               ${conn.is_active ? `
-                <button class="action-btn" onclick="syncConnection('${conn.user_id}')" title="Kontakte synchronisieren">&#128260; Sync</button>
+                <button class="action-btn" onclick="syncConnection('${conn.user_id}', event)" title="Kontakte synchronisieren">&#128260; Sync</button>
                 <button class="action-btn delete" onclick="disconnectConnection('${conn.id}')">Trennen</button>
               ` : `
                 <button class="action-btn toggle" onclick="reconnectConnection('${conn.id}')">Reconnect</button>
@@ -2237,12 +2237,16 @@
       }
     }
 
-    async function syncConnection(userId) {
-      const statusEl = document.getElementById('analyseStatus');
-      statusEl.textContent = '🔄 Synchronisiere Kontakte...';
+    async function syncConnection(userId, evt) {
+      const btn = evt.target;
+      // Show loading state
+      btn.disabled = true;
+      btn.innerHTML = '⏳...';
 
       try {
         const { data: { session } } = await supabaseClient.auth.getSession();
+
+        console.log('Starting sync for user:', userId);
 
         const response = await fetch(`${SUPABASE_URL}/functions/v1/ghl-sync`, {
           method: 'POST',
@@ -2257,25 +2261,31 @@
         });
 
         const result = await response.json();
+        console.log('Sync result:', result);
 
-        if (result.success || result.connections) {
-          const contacts = result.results?.[0]?.contacts || { synced: 0, errors: 0 };
-          const conversations = result.results?.[0]?.conversations || { synced: 0, errors: 0 };
+        if (result.success || result.synced_connections) {
+          // Get results for this user
+          const userResult = result.results?.[userId] || {};
+          const contacts = userResult.contacts || { synced: 0, errors: 0 };
+          const conversations = userResult.conversations || { synced: 0, errors: 0 };
 
-          statusEl.textContent = `✅ Sync: ${contacts.synced} Kontakte, ${conversations.synced} Konversationen`;
+          alert(`✅ Sync erfolgreich!\n\n📇 ${contacts.synced} Kontakte synchronisiert\n💬 ${conversations.synced} Konversationen synchronisiert`);
 
           // Reload data
           await loadConnections();
           await loadLeadsAnalyse();
           await loadStats();
-
-          setTimeout(() => { statusEl.textContent = ''; }, 5000);
         } else {
-          statusEl.textContent = '❌ Sync fehlgeschlagen: ' + (result.error || 'Unbekannt');
+          alert('❌ Sync fehlgeschlagen: ' + (result.error || JSON.stringify(result)));
         }
       } catch (error) {
-        statusEl.textContent = '❌ Sync Fehler: ' + error.message;
+        console.error('Sync error:', error);
+        alert('❌ Sync Fehler: ' + error.message);
       }
+
+      // Restore button
+      btn.disabled = false;
+      btn.innerHTML = '&#128260; Sync';
     }
 
     // Actions
