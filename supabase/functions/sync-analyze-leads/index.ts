@@ -230,12 +230,20 @@ serve(async (req) => {
     let failedCount = 0;
 
     // Separate leads with and without messages
+    // Filter out system messages (Opportunity created/updated)
     const leadsWithMessages: typeof allLeads = [];
     const leadsWithoutMessages: typeof allLeads = [];
 
     for (const lead of allLeads) {
       const messages = messagesByLead[lead.id] || [];
-      if (messages.length === 0) {
+      // Filter out system messages
+      const realMessages = messages.filter(m =>
+        m.content &&
+        !m.content.startsWith('Opportunity created') &&
+        !m.content.startsWith('Opportunity updated')
+      );
+
+      if (realMessages.length === 0) {
         leadsWithoutMessages.push(lead);
       } else {
         leadsWithMessages.push(lead);
@@ -250,36 +258,96 @@ serve(async (req) => {
         .update({
           last_analyzed_at: now,
           conversation_status: 'unterhaltung_laeuft',
-          ai_improvement_suggestion: 'Noch keine Nachrichten - Erstkontakt herstellen'
+          ai_improvement_suggestion: JSON.stringify({
+            status: 'no_messages',
+            summary: 'Noch keine Konversation - Erstkontakt herstellen',
+            simpli_platzierung: 'nicht',
+            lead_interesse: 'kein',
+            termin_status: 'kein',
+            gespraechs_status: 'offen',
+            follow_up: ['Erstkontakt herstellen'],
+            verbesserung: 'Erstkontakt mit Lead aufnehmen'
+          })
         })
         .in('id', noMsgIds);
       skippedCount = leadsWithoutMessages.length;
     }
 
-    // Process leads with messages in PARALLEL using Gemini 2.5 Flash
+    // Detailed analysis prompt based on user's requirements
+    const analysisPrompt = `Du bist ein Senior Conversation-, Sales- und Funnel-Analyst mit Fokus auf Immobilien, Finanzierungsberatung und KI-gestützte Lead-Qualifizierung.
+
+Der folgende Chat ist ein Gespräch zwischen einem Interessenten (Lead) und der KI des Maklers.
+Ziel der Makler-KI ist es, Simpli Finance (Finanzierungspartner) sinnvoll und glaubwürdig zu platzieren, sodass der Lead Interesse entwickelt und einen Termin buchen möchte.
+
+KONVERSATION:
+{{conversation}}
+
+Analysiere und bewerte:
+
+1. SIMPLI_PLATZIERUNG - Wurde Simpli Finance sinnvoll platziert?
+   - erfolg: Erfolgreich und natürlich platziert, Mehrwert klar
+   - teilweise: Erwähnt aber verbesserungsfähig (Timing, Erklärung)
+   - nicht: Nicht erwähnt oder unpassend platziert
+
+2. LEAD_INTERESSE - Hat der Lead Interesse an Simpli Finance/Finanzierung gezeigt?
+   - klar: Klares Interesse, Nachfragen, positive Reaktionen
+   - unsicher: Latentes/unklares Interesse, Finanzierung relevant
+   - kein: Kein erkennbares Interesse
+
+3. TERMIN_STATUS - Stand bezüglich Terminen:
+   - gebucht: Termin mit Simpli Finance ODER Makler gebucht/bestätigt
+   - interesse: Interesse an Termin gezeigt, aber nicht gebucht
+   - kein: Kein Termininteresse erkennbar
+
+4. GESPRAECHS_STATUS - Qualifizierungsstatus:
+   - qualifiziert: Erfolgreich qualifiziert & übergeben
+   - offen: Interesse vorhanden, Abschluss noch offen
+   - abgebrochen: Früh abgebrochen, kein Interesse, nicht qualifiziert
+
+5. FOLLOW_UP - Maximal 3 konkrete Follow-up Punkte (was nachgefasst werden sollte)
+
+6. VERBESSERUNG - Ein konkreter Satz was die KI besser machen könnte
+
+7. ZUSAMMENFASSUNG - Ein Satz der den aktuellen Stand beschreibt
+
+Antworte NUR mit JSON (keine Markdown-Blöcke):
+{
+  "simpli_platzierung": "erfolg|teilweise|nicht",
+  "lead_interesse": "klar|unsicher|kein",
+  "termin_status": "gebucht|interesse|kein",
+  "gespraechs_status": "qualifiziert|offen|abgebrochen",
+  "follow_up": ["Punkt 1", "Punkt 2"],
+  "verbesserung": "Konkreter Verbesserungsvorschlag",
+  "zusammenfassung": "Kurze Zusammenfassung"
+}`;
+
+    // Process leads with messages in PARALLEL using Gemini 2.0 Flash
     const analysisPromises = leadsWithMessages.map(async (lead) => {
       const messages = messagesByLead[lead.id] || [];
 
-      // Build conversation text (limit to last 30 messages for speed)
-      const recentMessages = messages.slice(-30);
+      // Filter out system messages
+      const realMessages = messages.filter(m =>
+        m.content &&
+        !m.content.startsWith('Opportunity created') &&
+        !m.content.startsWith('Opportunity updated')
+      );
+
+      // Build conversation text (limit to last 50 messages)
+      const recentMessages = realMessages.slice(-50);
       const conversationText = recentMessages.map(m => {
         const role = m.type === 'incoming' ? 'Kunde' : 'KI/Makler';
         return `${role}: ${m.content}`;
       }).join('\n');
 
       // Get last message info for status calculation
-      const lastMessage = messages[messages.length - 1];
-      const lastMessageDate = new Date(lastMessage.created_at);
+      const lastMessage = realMessages[realMessages.length - 1] || messages[messages.length - 1];
+      const lastMessageDate = new Date(lastMessage?.created_at || Date.now());
       const daysSinceLastMessage = Math.floor((Date.now() - lastMessageDate.getTime()) / (1000 * 60 * 60 * 24));
 
-      // Calculate conversation status based on last message date
-      let conversationStatus = 'unterhaltung_laeuft';
-      if (daysSinceLastMessage > 3) {
-        conversationStatus = 'unterhaltung_abgebrochen';
-      }
-
       try {
-        // Analyze with Gemini 2.5 Flash - simple 3-checkbox approach
+        // Analyze with Gemini 2.0 Flash - detailed analysis
+        const promptWithConversation = analysisPrompt.replace('{{conversation}}', conversationText);
+
         const analysisResponse = await fetch(
           `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${geminiKey}`,
           {
@@ -287,24 +355,11 @@ serve(async (req) => {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
               contents: [{
-                parts: [{
-                  text: `Analysiere diese Immobilien-Konversation und beantworte 3 Fragen mit true/false:
-
-KONVERSATION:
-${conversationText}
-
-FRAGEN:
-1. has_makler_termin: Wurde ein Besichtigungs- oder Beratungstermin mit dem Makler vereinbart/bestätigt?
-2. simpli_platziert: Wurde Simpli Finance (Finanzierungspartner) im Gespräch erwähnt/vorgestellt?
-3. simpli_interessiert: Hat der Kunde Interesse an Finanzierung/Simpli Finance gezeigt?
-
-Antworte NUR mit JSON:
-{"has_makler_termin":true/false,"simpli_platziert":true/false,"simpli_interessiert":true/false}`
-                }]
+                parts: [{ text: promptWithConversation }]
               }],
               generationConfig: {
                 temperature: 0.1,
-                maxOutputTokens: 300
+                maxOutputTokens: 1000
               }
             })
           }
@@ -318,7 +373,14 @@ Antworte NUR mit JSON:
 
         const analysisData = await analysisResponse.json();
         const content = analysisData.candidates?.[0]?.content?.parts?.[0]?.text || '';
-        const jsonMatch = content.match(/\{[\s\S]*\}/);
+
+        // Clean up markdown and extract JSON
+        const cleanedContent = content
+          .replace(/```json\s*/gi, '')
+          .replace(/```\s*/g, '')
+          .trim();
+
+        const jsonMatch = cleanedContent.match(/\{[\s\S]*\}/);
 
         if (!jsonMatch) {
           console.error('No JSON in Gemini response:', content);
@@ -327,15 +389,24 @@ Antworte NUR mit JSON:
 
         const analysis = JSON.parse(jsonMatch[0]);
 
+        // Map analysis to database fields
+        const conversationStatus = analysis.gespraechs_status === 'qualifiziert'
+          ? 'abgeschlossen'
+          : analysis.gespraechs_status === 'abgebrochen'
+            ? 'unterhaltung_abgebrochen'
+            : 'unterhaltung_laeuft';
+
         return {
           leadId: lead.id,
           success: true,
           data: {
             last_analyzed_at: now,
             conversation_status: conversationStatus,
-            has_makler_termin: analysis.has_makler_termin === true,
-            simpli_platziert: analysis.simpli_platziert === true,
-            simpli_interessiert: analysis.simpli_interessiert === true
+            has_makler_termin: analysis.termin_status === 'gebucht',
+            simpli_platziert: analysis.simpli_platzierung !== 'nicht',
+            simpli_interessiert: analysis.lead_interesse !== 'kein',
+            ai_quality_score: calculateQualityScore(analysis),
+            ai_improvement_suggestion: JSON.stringify(analysis)
           }
         };
 
@@ -344,6 +415,31 @@ Antworte NUR mit JSON:
         return { leadId: lead.id, success: false };
       }
     });
+
+    // Helper function to calculate quality score (1-10)
+    function calculateQualityScore(analysis: any): number {
+      let score = 5; // Base score
+
+      // Simpli Platzierung
+      if (analysis.simpli_platzierung === 'erfolg') score += 2;
+      else if (analysis.simpli_platzierung === 'teilweise') score += 1;
+      else score -= 1;
+
+      // Lead Interesse
+      if (analysis.lead_interesse === 'klar') score += 2;
+      else if (analysis.lead_interesse === 'unsicher') score += 1;
+      else score -= 1;
+
+      // Termin Status
+      if (analysis.termin_status === 'gebucht') score += 2;
+      else if (analysis.termin_status === 'interesse') score += 1;
+
+      // Gesprächs Status
+      if (analysis.gespraechs_status === 'qualifiziert') score += 1;
+      else if (analysis.gespraechs_status === 'abgebrochen') score -= 2;
+
+      return Math.max(1, Math.min(10, score));
+    }
 
     // Wait for all analyses to complete in parallel
     const results = await Promise.all(analysisPromises);
