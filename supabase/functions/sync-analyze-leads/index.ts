@@ -6,27 +6,28 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
-// Valid conversation statuses
-const CONVERSATION_STATUSES = [
-  'unterhaltung_laeuft',
-  'unterhaltung_abgebrochen',
-  'termin_gebucht',
-  'termin_angefragt',
-  'simpli_interessiert',
-  'simpli_nicht_interessiert',
-  'abgeschlossen'
-] as const;
+// Batch size - process this many leads per function call
+const BATCH_SIZE = 20; // Increased because Gemini is faster
 
-interface AnalysisResult {
-  lead_id: string;
-  lead_name: string;
-  location_name: string;
-  conversation_status: string;
-  ai_quality_score: number;
-  ai_improvement_suggestion: string;
-  message_count: number;
-  last_message_at: string;
-  is_new_analysis: boolean;
+// Self-invoke to continue processing in background
+async function continueInBackground(supabaseUrl: string, supabaseKey: string, jobId: string, forceAll: boolean, geminiApiKey?: string) {
+  try {
+    // Fire and forget - don't await
+    fetch(`${supabaseUrl}/functions/v1/sync-analyze-leads`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${supabaseKey}`,
+      },
+      body: JSON.stringify({
+        job_id: jobId,
+        force_all: forceAll,
+        gemini_api_key: geminiApiKey
+      })
+    }).catch(err => console.error('Background continuation failed:', err));
+  } catch (e) {
+    console.error('Failed to trigger background continuation:', e);
+  }
 }
 
 serve(async (req) => {
@@ -37,122 +38,177 @@ serve(async (req) => {
   try {
     const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
     const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
-    const anthropicKey = Deno.env.get('ANTHROPIC_API_KEY')!;
 
     const supabase = createClient(supabaseUrl, supabaseKey);
 
-    const { force_all = false, prompts = {} } = await req.json().catch(() => ({}));
+    const { force_all = false, job_id, gemini_api_key } = await req.json().catch(() => ({}));
 
-    // Custom prompts from dashboard settings
-    const promptStatus = prompts.promptStatus || `Bestimme den Status basierend auf:
-- unterhaltung_laeuft: Aktiver Dialog, Kunde antwortet regelmäßig
-- unterhaltung_abgebrochen: Keine Kundenantwort seit >3 Tagen
-- termin_gebucht: Kunde hat Besichtigungs-/Beratungstermin bestätigt
-- termin_angefragt: Kunde fragt nach Termin oder Rückruf
-- simpli_interessiert: Kunde zeigt Interesse an Finanzierung
-- simpli_nicht_interessiert: Kunde lehnt Finanzierung ab
-- abgeschlossen: Gespräch ist beendet (Kauf, Absage, etc.)`;
+    // Use provided key or fallback to env var
+    const geminiKey = gemini_api_key || Deno.env.get('GEMINI_API_KEY');
 
-    const promptScore = prompts.promptScore || `Bewerte die KI-Qualität (1-10) basierend auf:
-1. Wurden alle Fragen des Kunden vollständig beantwortet?
-2. War die KI höflich und professionell?
-3. Hat die KI aktiv versucht, einen Termin zu vereinbaren?
-4. Wurden Einwände des Kunden professionell behandelt?
-5. Wurde Simpli Finance bei Finanzierungsfragen erwähnt?`;
-
-    const promptImprovement = prompts.promptImprovement || `Gib konkrete Verbesserungsvorschläge wie:
-- "Die KI sollte aktiver nach einem Besichtigungstermin fragen"
-- "Bei Finanzierungsfragen Simpli Finance erwähnen"
-- "Schneller auf Kundenanfragen reagieren"`;
-
-    // Get all active connections
-    const { data: connections } = await supabase
-      .from('ghl_connections')
-      .select('id, user_id, location_id, location_name')
-      .eq('is_active', true);
-
-    if (!connections || connections.length === 0) {
+    if (!geminiKey) {
       return new Response(
-        JSON.stringify({ success: true, message: 'Keine aktiven Verbindungen', analyzed: 0 }),
-        { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        JSON.stringify({ success: false, error: 'GEMINI_API_KEY nicht konfiguriert. Bitte in SimpliOS unter Einstellungen > APIs eingeben.' }),
+        { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 400 }
       );
     }
 
-    // Map user_id to location_name
-    const userToLocation: Record<string, string> = {};
-    connections.forEach(c => {
-      userToLocation[c.user_id] = c.location_name || 'Unbekannt';
-    });
+    // ============ MODE 1: START NEW JOB ============
+    if (!job_id) {
+      // Get all active connections
+      const { data: connections, error: connError } = await supabase
+        .from('ghl_connections')
+        .select('id, user_id, location_id, location_name')
+        .eq('is_active', true);
 
-    const userIds = connections.map(c => c.user_id);
-
-    // First, update last_message_at for all leads manually
-    // (No RPC needed - just do it directly)
-    {
-      // Get latest message per lead
-      const { data: latestMessages } = await supabase
-        .from('messages')
-        .select('lead_id, created_at')
-        .order('created_at', { ascending: false });
-
-      if (latestMessages) {
-        const leadMessageMap: Record<string, string> = {};
-        latestMessages.forEach(m => {
-          if (!leadMessageMap[m.lead_id]) {
-            leadMessageMap[m.lead_id] = m.created_at;
-          }
-        });
-
-        // Update each lead's last_message_at
-        for (const [leadId, lastMessageAt] of Object.entries(leadMessageMap)) {
-          await supabase
-            .from('leads')
-            .update({ last_message_at: lastMessageAt })
-            .eq('id', leadId);
-        }
+      if (connError || !connections || connections.length === 0) {
+        return new Response(
+          JSON.stringify({ success: false, error: 'Keine aktiven Verbindungen' }),
+          { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        );
       }
-    }
 
-    // Get all leads for these users (excluding archived)
-    const { data: allLeads, error: leadsError } = await supabase
-      .from('leads')
-      .select('id, user_id, name, email, phone, status, last_analyzed_at, last_message_at, conversation_status, is_archived')
-      .in('user_id', userIds)
-      .or('is_archived.is.null,is_archived.eq.false');
+      const locationIds = connections.map(c => c.location_id);
 
-    if (leadsError) {
-      console.error('Error fetching leads:', leadsError);
-      throw new Error('Failed to fetch leads: ' + leadsError.message);
-    }
+      // Get leads to analyze
+      const { data: allLeads, error: leadsError } = await supabase
+        .from('leads')
+        .select('id, ghl_location_id, name, email, last_analyzed_at, last_message_at, is_archived')
+        .in('ghl_location_id', locationIds);
 
-    // Filter leads that need analysis (in JS since Supabase can't compare columns)
-    let leads = allLeads || [];
-    if (!force_all) {
-      leads = leads.filter(lead => {
-        // Never analyzed
-        if (!lead.last_analyzed_at) return true;
-        // Has new messages since last analysis
-        if (lead.last_message_at && new Date(lead.last_message_at) > new Date(lead.last_analyzed_at)) return true;
-        return false;
-      });
-    }
+      if (leadsError) {
+        return new Response(
+          JSON.stringify({ success: false, error: 'Fehler beim Laden der Leads' }),
+          { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        );
+      }
 
-    if (!leads || leads.length === 0) {
+      // Filter leads
+      let leads = (allLeads || []).filter(lead => !lead.is_archived);
+
+      if (!force_all) {
+        leads = leads.filter(lead => {
+          if (!lead.last_analyzed_at) return true;
+          if (lead.last_message_at && new Date(lead.last_message_at) > new Date(lead.last_analyzed_at)) return true;
+          return false;
+        });
+      }
+
+      if (leads.length === 0) {
+        return new Response(
+          JSON.stringify({ success: true, message: 'Keine Leads zu analysieren', job_id: null }),
+          { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        );
+      }
+
+      // Create job record (force_all is passed separately, not stored in DB)
+      const { data: job, error: jobError } = await supabase
+        .from('analysis_jobs')
+        .insert({
+          status: 'running',
+          total_leads: leads.length,
+          analyzed_leads: 0,
+          skipped_no_messages: 0,
+          failed_leads: 0,
+          started_at: new Date().toISOString()
+        })
+        .select()
+        .single();
+
+      if (jobError || !job) {
+        return new Response(
+          JSON.stringify({ success: false, error: 'Fehler beim Erstellen des Jobs' }),
+          { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        );
+      }
+
+      // Immediately start background processing (self-invoke)
+      continueInBackground(supabaseUrl, supabaseKey, job.id, force_all, geminiKey);
+
       return new Response(
         JSON.stringify({
           success: true,
-          message: 'Keine neuen Konversationen zu analysieren',
-          analyzed: 0,
-          results: []
+          job_id: job.id,
+          total_leads: leads.length,
+          message: `Analyse gestartet für ${leads.length} Leads (läuft im Hintergrund)`
         }),
         { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
 
-    console.log(`Found ${leads.length} leads to analyze`);
+    // ============ MODE 2: CONTINUE EXISTING JOB ============
+    // Get job status
+    const { data: job, error: jobError } = await supabase
+      .from('analysis_jobs')
+      .select('*')
+      .eq('id', job_id)
+      .single();
+
+    if (jobError || !job) {
+      return new Response(
+        JSON.stringify({ success: false, error: 'Job nicht gefunden' }),
+        { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
+
+    if (job.status === 'completed' || job.status === 'failed') {
+      return new Response(
+        JSON.stringify({ success: true, job, message: 'Job bereits abgeschlossen' }),
+        { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
+
+    // Get connections for location mapping
+    const { data: connections } = await supabase
+      .from('ghl_connections')
+      .select('location_id, location_name')
+      .eq('is_active', true);
+
+    const locationToName: Record<string, string> = {};
+    (connections || []).forEach(c => {
+      locationToName[c.location_id] = c.location_name || 'Unbekannt';
+    });
+
+    const locationIds = Object.keys(locationToName);
+
+    // Get leads that still need analysis
+    let leadsQuery = supabase
+      .from('leads')
+      .select('id, ghl_location_id, name, email, phone, status, last_analyzed_at, last_message_at, conversation_status, is_archived')
+      .in('ghl_location_id', locationIds)
+      .or('is_archived.is.null,is_archived.eq.false');
+
+    if (!force_all) {
+      // Only get leads that need analysis
+      leadsQuery = leadsQuery.or('last_analyzed_at.is.null,last_message_at.gt.last_analyzed_at');
+    }
+
+    const { data: allLeads } = await leadsQuery.limit(BATCH_SIZE);
+
+    if (!allLeads || allLeads.length === 0) {
+      // All done!
+      await supabase
+        .from('analysis_jobs')
+        .update({
+          status: 'completed',
+          completed_at: new Date().toISOString()
+        })
+        .eq('id', job_id);
+
+      return new Response(
+        JSON.stringify({
+          success: true,
+          job_id,
+          status: 'completed',
+          analyzed_leads: job.analyzed_leads,
+          total_leads: job.total_leads
+        }),
+        { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
 
     // Get messages for these leads
-    const leadIds = leads.map(l => l.id);
+    const leadIds = allLeads.map(l => l.id);
     const { data: allMessages } = await supabase
       .from('messages')
       .select('id, lead_id, content, type, created_at')
@@ -168,165 +224,186 @@ serve(async (req) => {
       messagesByLead[msg.lead_id].push(msg);
     });
 
-    const results: AnalysisResult[] = [];
     const now = new Date().toISOString();
+    let analyzedCount = 0;
+    let skippedCount = 0;
+    let failedCount = 0;
 
-    // Analyze each lead
-    for (const lead of leads) {
+    // Separate leads with and without messages
+    const leadsWithMessages: typeof allLeads = [];
+    const leadsWithoutMessages: typeof allLeads = [];
+
+    for (const lead of allLeads) {
+      const messages = messagesByLead[lead.id] || [];
+      if (messages.length === 0) {
+        leadsWithoutMessages.push(lead);
+      } else {
+        leadsWithMessages.push(lead);
+      }
+    }
+
+    // Handle leads without messages (batch update)
+    if (leadsWithoutMessages.length > 0) {
+      const noMsgIds = leadsWithoutMessages.map(l => l.id);
+      await supabase
+        .from('leads')
+        .update({
+          last_analyzed_at: now,
+          conversation_status: 'unterhaltung_laeuft',
+          ai_improvement_suggestion: 'Noch keine Nachrichten - Erstkontakt herstellen'
+        })
+        .in('id', noMsgIds);
+      skippedCount = leadsWithoutMessages.length;
+    }
+
+    // Process leads with messages in PARALLEL using Gemini 2.5 Flash
+    const analysisPromises = leadsWithMessages.map(async (lead) => {
       const messages = messagesByLead[lead.id] || [];
 
-      if (messages.length === 0) {
-        // No messages - mark as needs attention
-        await supabase
-          .from('leads')
-          .update({
-            last_analyzed_at: now,
-            conversation_status: 'unterhaltung_laeuft',
-            ai_improvement_suggestion: 'Noch keine Nachrichten - Erstkontakt herstellen'
-          })
-          .eq('id', lead.id);
-        continue;
-      }
-
-      // Build conversation text
-      const conversationText = messages.map(m => {
+      // Build conversation text (limit to last 30 messages for speed)
+      const recentMessages = messages.slice(-30);
+      const conversationText = recentMessages.map(m => {
         const role = m.type === 'incoming' ? 'Kunde' : 'KI/Makler';
         return `${role}: ${m.content}`;
       }).join('\n');
 
-      // Get last message info
+      // Get last message info for status calculation
       const lastMessage = messages[messages.length - 1];
       const lastMessageDate = new Date(lastMessage.created_at);
       const daysSinceLastMessage = Math.floor((Date.now() - lastMessageDate.getTime()) / (1000 * 60 * 60 * 24));
 
-      // Analyze with Claude
-      const analysisResponse = await fetch('https://api.anthropic.com/v1/messages', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-api-key': anthropicKey,
-          'anthropic-version': '2023-06-01',
-        },
-        body: JSON.stringify({
-          model: 'claude-3-haiku-20240307',
-          max_tokens: 1500,
-          messages: [{
-            role: 'user',
-            content: `Du bist ein Analyse-Experte für Immobilien-Kundenservice. Analysiere diese Konversation und bewerte die KI-Performance.
+      // Calculate conversation status based on last message date
+      let conversationStatus = 'unterhaltung_laeuft';
+      if (daysSinceLastMessage > 3) {
+        conversationStatus = 'unterhaltung_abgebrochen';
+      }
+
+      try {
+        // Analyze with Gemini 2.5 Flash - simple 3-checkbox approach
+        const analysisResponse = await fetch(
+          `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${geminiKey}`,
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              contents: [{
+                parts: [{
+                  text: `Analysiere diese Immobilien-Konversation und beantworte 3 Fragen mit true/false:
 
 KONVERSATION:
 ${conversationText}
 
-KONTEXT:
-- Tage seit letzter Nachricht: ${daysSinceLastMessage}
-- Letzte Nachricht war von: ${lastMessage.type === 'incoming' ? 'Kunde' : 'KI/Makler'}
-- Anzahl Nachrichten: ${messages.length}
+FRAGEN:
+1. has_makler_termin: Wurde ein Besichtigungs- oder Beratungstermin mit dem Makler vereinbart/bestätigt?
+2. simpli_platziert: Wurde Simpli Finance (Finanzierungspartner) im Gespräch erwähnt/vorgestellt?
+3. simpli_interessiert: Hat der Kunde Interesse an Finanzierung/Simpli Finance gezeigt?
 
-BEWERTUNGSKRITERIEN:
+Antworte NUR mit JSON:
+{"has_makler_termin":true/false,"simpli_platziert":true/false,"simpli_interessiert":true/false}`
+                }]
+              }],
+              generationConfig: {
+                temperature: 0.1,
+                maxOutputTokens: 300
+              }
+            })
+          }
+        );
 
-STATUS-BEWERTUNG:
-${promptStatus}
-
-KI-SCORE BEWERTUNG:
-${promptScore}
-
-VERBESSERUNGSVORSCHLÄGE:
-${promptImprovement}
-
-Antworte NUR mit einem JSON-Objekt:
-{
-  "conversation_status": "<einer von: unterhaltung_laeuft, unterhaltung_abgebrochen, termin_gebucht, termin_angefragt, simpli_interessiert, simpli_nicht_interessiert, abgeschlossen>",
-  "ai_quality_score": <1-10>,
-  "improvement_suggestion": "<Konkreter Verbesserungsvorschlag in 1-2 Sätzen>"
-}`
-          }]
-        })
-      });
-
-      if (!analysisResponse.ok) {
-        console.error('Claude API error for lead', lead.id);
-        continue;
-      }
-
-      const analysisData = await analysisResponse.json();
-      let analysis;
-
-      try {
-        const content = analysisData.content[0].text;
-        const jsonMatch = content.match(/\{[\s\S]*\}/);
-        if (jsonMatch) {
-          analysis = JSON.parse(jsonMatch[0]);
-        } else {
-          console.error('No JSON found for lead', lead.id);
-          continue;
+        if (!analysisResponse.ok) {
+          const errorText = await analysisResponse.text();
+          console.error('Gemini API error:', errorText);
+          return { leadId: lead.id, success: false };
         }
+
+        const analysisData = await analysisResponse.json();
+        const content = analysisData.candidates?.[0]?.content?.parts?.[0]?.text || '';
+        const jsonMatch = content.match(/\{[\s\S]*\}/);
+
+        if (!jsonMatch) {
+          console.error('No JSON in Gemini response:', content);
+          return { leadId: lead.id, success: false };
+        }
+
+        const analysis = JSON.parse(jsonMatch[0]);
+
+        return {
+          leadId: lead.id,
+          success: true,
+          data: {
+            last_analyzed_at: now,
+            conversation_status: conversationStatus,
+            has_makler_termin: analysis.has_makler_termin === true,
+            simpli_platziert: analysis.simpli_platziert === true,
+            simpli_interessiert: analysis.simpli_interessiert === true
+          }
+        };
+
       } catch (e) {
-        console.error('Failed to parse analysis for lead', lead.id, e);
-        continue;
+        console.error('Analysis error for lead', lead.id, e);
+        return { leadId: lead.id, success: false };
       }
-
-      // Validate status
-      let status = analysis.conversation_status;
-      if (!CONVERSATION_STATUSES.includes(status)) {
-        status = 'unterhaltung_laeuft';
-      }
-
-      // Override status if no response for too long
-      if (daysSinceLastMessage > 3 && lastMessage.type === 'outgoing' && status === 'unterhaltung_laeuft') {
-        status = 'unterhaltung_abgebrochen';
-      }
-
-      // Update lead in database
-      const { error: updateError } = await supabase
-        .from('leads')
-        .update({
-          last_analyzed_at: now,
-          conversation_status: status,
-          ai_quality_score: analysis.ai_quality_score || 5,
-          ai_improvement_suggestion: analysis.improvement_suggestion || null
-        })
-        .eq('id', lead.id);
-
-      if (updateError) {
-        console.error('Failed to update lead', lead.id, updateError);
-      }
-
-      results.push({
-        lead_id: lead.id,
-        lead_name: lead.name || lead.email || 'Unbekannt',
-        location_name: userToLocation[lead.user_id],
-        conversation_status: status,
-        ai_quality_score: analysis.ai_quality_score || 5,
-        ai_improvement_suggestion: analysis.improvement_suggestion || '',
-        message_count: messages.length,
-        last_message_at: lastMessage.created_at,
-        is_new_analysis: !lead.last_analyzed_at
-      });
-    }
-
-    // Calculate summary stats
-    const statusCounts: Record<string, number> = {};
-    results.forEach(r => {
-      statusCounts[r.conversation_status] = (statusCounts[r.conversation_status] || 0) + 1;
     });
 
-    const avgQuality = results.length > 0
-      ? Math.round((results.reduce((sum, r) => sum + r.ai_quality_score, 0) / results.length) * 10) / 10
-      : 0;
+    // Wait for all analyses to complete in parallel
+    const results = await Promise.all(analysisPromises);
+
+    // Update leads with successful analyses
+    for (const result of results) {
+      if (result.success && result.data) {
+        await supabase
+          .from('leads')
+          .update(result.data)
+          .eq('id', result.leadId);
+        analyzedCount++;
+      } else {
+        failedCount++;
+      }
+    }
+
+    // Update job progress
+    const { data: updatedJob } = await supabase
+      .from('analysis_jobs')
+      .update({
+        analyzed_leads: job.analyzed_leads + analyzedCount,
+        skipped_no_messages: job.skipped_no_messages + skippedCount,
+        failed_leads: job.failed_leads + failedCount
+      })
+      .eq('id', job_id)
+      .select()
+      .single();
+
+    // Check if more leads to process
+    const processedTotal = (updatedJob?.analyzed_leads || 0) + (updatedJob?.skipped_no_messages || 0) + (updatedJob?.failed_leads || 0);
+    const isComplete = processedTotal >= job.total_leads;
+
+    if (isComplete) {
+      await supabase
+        .from('analysis_jobs')
+        .update({
+          status: 'completed',
+          completed_at: new Date().toISOString(),
+          current_lead_name: null
+        })
+        .eq('id', job_id);
+    } else {
+      // Continue processing in background (self-invoke)
+      continueInBackground(supabaseUrl, supabaseKey, job_id, force_all, geminiKey);
+    }
 
     return new Response(
       JSON.stringify({
         success: true,
-        analyzed: results.length,
-        summary: {
-          avg_quality_score: avgQuality,
-          status_breakdown: statusCounts,
-          needs_attention: results.filter(r =>
-            r.conversation_status === 'unterhaltung_abgebrochen' ||
-            r.ai_quality_score < 5
-          ).length
-        },
-        results
+        job_id,
+        status: isComplete ? 'completed' : 'running',
+        analyzed_leads: updatedJob?.analyzed_leads || 0,
+        skipped_no_messages: updatedJob?.skipped_no_messages || 0,
+        failed_leads: updatedJob?.failed_leads || 0,
+        total_leads: job.total_leads,
+        batch_analyzed: analyzedCount,
+        batch_skipped: skippedCount,
+        batch_failed: failedCount,
+        has_more: !isComplete
       }),
       { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     );
