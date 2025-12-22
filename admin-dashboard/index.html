@@ -1605,6 +1605,7 @@
         <button class="tab active" onclick="switchTab('whitelist')">Whitelist</button>
         <button class="tab" onclick="switchTab('connections')">Verbindungen</button>
         <button class="tab" onclick="switchTab('analyse')">&#128202; Analyse</button>
+        <button class="tab" onclick="switchTab('steuerregeln')">&#128218; Steuerregeln</button>
       </div>
 
       <!-- Whitelist Tab -->
@@ -1774,7 +1775,280 @@
           </div>
         </div>
       </div>
+
+      <!-- Steuerregeln Tab -->
+      <div class="tab-content" id="tab-steuerregeln">
+        <!-- Header -->
+        <div class="analyse-header">
+          <div class="analyse-title">
+            <h2>&#128218; Steuerregeln Datenbank</h2>
+            <p class="analyse-subtitle">Deutsche Steuerregeln für Beleg-Scan, KI-Chat und Berechnungen. Hier werden alle Pauschalen, Höchstbeträge und Absetzregeln gepflegt.</p>
+          </div>
+          <div class="analyse-actions">
+            <select id="taxRulesYearFilter" class="subaccount-select" onchange="filterTaxRulesByYear(this.value)">
+              <option value="alle">Alle Jahre</option>
+              <option value="2025">2025</option>
+              <option value="2024">2024</option>
+              <option value="2023">2023</option>
+            </select>
+            <select id="taxRulesCategoryFilter" class="subaccount-select" onchange="filterTaxRulesByCategory(this.value)">
+              <option value="alle">Alle Kategorien</option>
+              <option value="werbungskosten">Werbungskosten</option>
+              <option value="haushaltsnahe">Haushaltsnahe</option>
+              <option value="sonderausgaben">Sonderausgaben</option>
+              <option value="vorsorge">Vorsorge</option>
+              <option value="aussergewoehnliche_belastungen">Außergew. Belastungen</option>
+            </select>
+            <button class="btn-refresh" onclick="loadTaxRules()">
+              &#8635; Aktualisieren
+            </button>
+            <button class="btn btn-primary" style="width: auto; padding: 10px 20px;" onclick="openTaxRuleModal()">
+              + Neue Regel
+            </button>
+          </div>
+        </div>
+
+        <!-- Stats -->
+        <div class="results-grid" style="grid-template-columns: repeat(3, 1fr);">
+          <div class="result-card">
+            <div class="label">Regeln gesamt</div>
+            <div class="value" id="taxRulesTotal">-</div>
+            <div class="subvalue">Alle Jahre & Kategorien</div>
+          </div>
+          <div class="result-card">
+            <div class="label">Aktive Regeln</div>
+            <div class="value" id="taxRulesActive">-</div>
+            <div class="subvalue">is_active = true</div>
+          </div>
+          <div class="result-card">
+            <div class="label">Letzte Änderung</div>
+            <div class="value" id="taxRulesLastUpdate" style="font-size: 16px;">-</div>
+            <div class="subvalue">Zuletzt aktualisiert</div>
+          </div>
+        </div>
+
+        <!-- Table -->
+        <div class="card">
+          <div class="card-body">
+            <table>
+              <thead>
+                <tr>
+                  <th>Regel</th>
+                  <th>Kategorie</th>
+                  <th>Jahr</th>
+                  <th>Betrag</th>
+                  <th>Max / %</th>
+                  <th>Rechtl. Grundlage</th>
+                  <th>Status</th>
+                  <th>Aktionen</th>
+                </tr>
+              </thead>
+              <tbody id="taxRulesTable">
+                <tr><td colspan="8" class="empty-state">Laden...</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
     </main>
+  </div>
+
+  <!-- Tax Rule Modal -->
+  <div class="modal-overlay hidden" id="taxRuleModal">
+    <div class="modal" style="max-width: 700px;">
+      <div class="modal-header">
+        <h3 id="taxRuleModalTitle">Steuerregel bearbeiten</h3>
+        <button class="modal-close" onclick="closeTaxRuleModal()">&times;</button>
+      </div>
+      <div class="modal-body" style="max-height: 60vh; overflow-y: auto;">
+        <form id="taxRuleForm">
+          <input type="hidden" id="taxRuleId">
+
+          <div class="config-grid">
+            <div class="config-group">
+              <label>Regel-Schlüssel *</label>
+              <input type="text" id="taxRuleKey" placeholder="z.B. pendlerpauschale" required>
+            </div>
+            <div class="config-group">
+              <label>Anzeigename *</label>
+              <input type="text" id="taxRuleDisplayName" placeholder="z.B. Pendlerpauschale" required>
+            </div>
+          </div>
+
+          <div class="config-grid">
+            <div class="config-group">
+              <label>Kategorie *</label>
+              <select id="taxRuleCategory" required>
+                <option value="">Bitte wählen...</option>
+                <option value="werbungskosten">Werbungskosten</option>
+                <option value="haushaltsnahe">Haushaltsnahe</option>
+                <option value="sonderausgaben">Sonderausgaben</option>
+                <option value="vorsorge">Vorsorge</option>
+                <option value="aussergewoehnliche_belastungen">Außergew. Belastungen</option>
+              </select>
+            </div>
+            <div class="config-group">
+              <label>Unterkategorie</label>
+              <input type="text" id="taxRuleSubcategory" placeholder="z.B. fahrtkosten">
+            </div>
+          </div>
+
+          <div class="config-grid">
+            <div class="config-group">
+              <label>Jahr *</label>
+              <select id="taxRuleYear" required>
+                <option value="2025">2025</option>
+                <option value="2024">2024</option>
+                <option value="2023">2023</option>
+              </select>
+            </div>
+            <div class="config-group">
+              <label>Status</label>
+              <select id="taxRuleIsActive">
+                <option value="true">Aktiv</option>
+                <option value="false">Inaktiv</option>
+              </select>
+            </div>
+          </div>
+
+          <hr style="margin: 20px 0; border: none; border-top: 1px solid #E5E7EB;">
+          <h4 style="margin-bottom: 16px; color: #374151;">Beträge & Limits</h4>
+
+          <div class="config-grid">
+            <div class="config-group">
+              <label>Fester Betrag (€)</label>
+              <input type="number" step="0.01" id="taxRuleAmount" placeholder="z.B. 1230">
+            </div>
+            <div class="config-group">
+              <label>Betrag pro Einheit (€)</label>
+              <input type="number" step="0.0001" id="taxRuleAmountPerUnit" placeholder="z.B. 0.30">
+            </div>
+          </div>
+
+          <div class="config-grid">
+            <div class="config-group">
+              <label>Einheit</label>
+              <select id="taxRuleUnit">
+                <option value="">Keine</option>
+                <option value="km">km (Kilometer)</option>
+                <option value="tag">Tag</option>
+                <option value="monat">Monat</option>
+                <option value="kind">Kind</option>
+                <option value="prozent">Prozent</option>
+                <option value="jahr">Jahr</option>
+              </select>
+            </div>
+            <div class="config-group">
+              <label>Höchstbetrag (€)</label>
+              <input type="number" step="0.01" id="taxRuleMaxAmount" placeholder="z.B. 4000">
+            </div>
+          </div>
+
+          <div class="config-grid">
+            <div class="config-group">
+              <label>Max. Tage</label>
+              <input type="number" id="taxRuleMaxDays" placeholder="z.B. 210">
+            </div>
+            <div class="config-group">
+              <label>Absetzbar in %</label>
+              <input type="number" id="taxRulePercentage" placeholder="z.B. 20">
+            </div>
+          </div>
+
+          <div class="config-grid">
+            <div class="config-group">
+              <label style="display: flex; align-items: center; gap: 8px;">
+                <input type="checkbox" id="taxRuleDirectDeduction">
+                Direkter Steuerabzug (§35a)
+              </label>
+            </div>
+          </div>
+
+          <hr style="margin: 20px 0; border: none; border-top: 1px solid #E5E7EB;">
+          <h4 style="margin-bottom: 16px; color: #374151;">Schwellenwerte</h4>
+
+          <div class="config-grid">
+            <div class="config-group">
+              <label>Schwellen-Betrag (€)</label>
+              <input type="number" step="0.01" id="taxRuleThresholdAmount" placeholder="z.B. 20 (ab 21. km)">
+            </div>
+            <div class="config-group">
+              <label>Rate nach Schwelle (€)</label>
+              <input type="number" step="0.0001" id="taxRuleThresholdRate" placeholder="z.B. 0.38">
+            </div>
+          </div>
+
+          <hr style="margin: 20px 0; border: none; border-top: 1px solid #E5E7EB;">
+          <h4 style="margin-bottom: 16px; color: #374151;">Rechtliche Grundlage</h4>
+
+          <div class="config-grid">
+            <div class="config-group">
+              <label>Paragraph</label>
+              <input type="text" id="taxRuleLegalRef" placeholder="z.B. §9 Abs.1 S.3 Nr.4 EStG">
+            </div>
+            <div class="config-group">
+              <label>Gesetz-URL</label>
+              <input type="url" id="taxRuleLegalRefUrl" placeholder="https://gesetze-im-internet.de/...">
+            </div>
+          </div>
+
+          <hr style="margin: 20px 0; border: none; border-top: 1px solid #E5E7EB;">
+          <h4 style="margin-bottom: 16px; color: #374151;">Anforderungen</h4>
+
+          <div class="config-grid">
+            <div class="config-group">
+              <label style="display: flex; align-items: center; gap: 8px;">
+                <input type="checkbox" id="taxRuleRequiresReceipt" checked>
+                Beleg erforderlich
+              </label>
+            </div>
+            <div class="config-group">
+              <label style="display: flex; align-items: center; gap: 8px;">
+                <input type="checkbox" id="taxRuleRequiresBankTransfer">
+                Überweisung Pflicht (§35a)
+              </label>
+            </div>
+          </div>
+
+          <div class="config-grid">
+            <div class="config-group">
+              <label style="display: flex; align-items: center; gap: 8px;">
+                <input type="checkbox" id="taxRuleRequiresInvoiceSplit">
+                Arbeitskosten separat
+              </label>
+            </div>
+            <div class="config-group">
+              <label style="display: flex; align-items: center; gap: 8px;">
+                <input type="checkbox" id="taxRuleRequiresProfessionalUse">
+                Berufliche Nutzung nachweisen
+              </label>
+            </div>
+          </div>
+
+          <hr style="margin: 20px 0; border: none; border-top: 1px solid #E5E7EB;">
+          <h4 style="margin-bottom: 16px; color: #374151;">Beschreibung</h4>
+
+          <div class="config-group full-width">
+            <label>Kurzbeschreibung</label>
+            <input type="text" id="taxRuleShortDescription" placeholder="Kurze Beschreibung für UI">
+          </div>
+
+          <div class="config-group full-width">
+            <label>Ausführliche Beschreibung</label>
+            <textarea id="taxRuleDescription" rows="3" placeholder="Detaillierte Beschreibung für KI-Beratung"></textarea>
+          </div>
+
+          <div class="config-group full-width">
+            <label>Keywords (kommagetrennt)</label>
+            <input type="text" id="taxRuleKeywords" placeholder="z.B. pendler, fahrt, arbeit, weg">
+          </div>
+        </form>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" onclick="closeTaxRuleModal()">Abbrechen</button>
+        <button class="btn btn-primary" onclick="saveTaxRule()">Speichern</button>
+      </div>
+    </div>
   </div>
 
   <!-- Analysis Progress Modal -->
@@ -3212,6 +3486,7 @@
       if (e.key === 'Escape') {
         closeConversation();
         closeAnalyseSettings();
+        closeTaxRuleModal();
       }
     });
 
@@ -3272,6 +3547,310 @@
         closeAnalyseSettings();
       }
     });
+
+    // ========== TAX RULES FUNCTIONS ==========
+    let allTaxRules = [];
+    let filteredTaxRules = [];
+
+    async function loadTaxRules() {
+      const tbody = document.getElementById('taxRulesTable');
+      tbody.innerHTML = '<tr><td colspan="8" class="empty-state">Laden...</td></tr>';
+
+      try {
+        const { data, error } = await supabaseClient
+          .from('tax_rules')
+          .select('*')
+          .order('category', { ascending: true })
+          .order('year', { ascending: false })
+          .order('display_name', { ascending: true });
+
+        if (error) throw error;
+
+        allTaxRules = data || [];
+        filteredTaxRules = [...allTaxRules];
+
+        // Update stats
+        document.getElementById('taxRulesTotal').textContent = allTaxRules.length;
+        document.getElementById('taxRulesActive').textContent = allTaxRules.filter(r => r.is_active).length;
+
+        if (allTaxRules.length > 0) {
+          const lastUpdate = allTaxRules.reduce((latest, r) => {
+            const rDate = new Date(r.updated_at || r.created_at);
+            return rDate > latest ? rDate : latest;
+          }, new Date(0));
+          document.getElementById('taxRulesLastUpdate').textContent = lastUpdate.toLocaleDateString('de-DE');
+        }
+
+        renderTaxRulesTable();
+      } catch (error) {
+        console.error('Error loading tax rules:', error);
+        tbody.innerHTML = '<tr><td colspan="8" class="empty-state">Fehler beim Laden: ' + error.message + '</td></tr>';
+      }
+    }
+
+    function renderTaxRulesTable() {
+      const tbody = document.getElementById('taxRulesTable');
+
+      if (filteredTaxRules.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="8" class="empty-state"><div class="icon">&#128218;</div>Keine Steuerregeln gefunden</td></tr>';
+        return;
+      }
+
+      const categoryLabels = {
+        'werbungskosten': 'Werbungskosten',
+        'haushaltsnahe': 'Haushaltsnahe',
+        'sonderausgaben': 'Sonderausgaben',
+        'vorsorge': 'Vorsorge',
+        'aussergewoehnliche_belastungen': 'Außergew. Belast.'
+      };
+
+      tbody.innerHTML = filteredTaxRules.map(rule => {
+        // Format amount display
+        let amountDisplay = '-';
+        if (rule.amount) {
+          amountDisplay = rule.amount.toLocaleString('de-DE') + ' €';
+        } else if (rule.amount_per_unit) {
+          amountDisplay = rule.amount_per_unit.toLocaleString('de-DE', { minimumFractionDigits: 2 }) + ' €/' + (rule.unit || 'Einheit');
+        }
+
+        // Format max/percentage display
+        let maxDisplay = '-';
+        if (rule.max_amount) {
+          maxDisplay = 'Max: ' + rule.max_amount.toLocaleString('de-DE') + ' €';
+        } else if (rule.percentage) {
+          maxDisplay = rule.percentage + '%';
+        } else if (rule.max_days) {
+          maxDisplay = 'Max: ' + rule.max_days + ' Tage';
+        }
+
+        return `
+          <tr>
+            <td>
+              <strong>${rule.display_name}</strong><br>
+              <small style="color: #6B7280;">${rule.rule_key}</small>
+            </td>
+            <td>
+              <span class="badge" style="background: #EDE9FE; color: #7C3AED;">
+                ${categoryLabels[rule.category] || rule.category}
+              </span>
+              ${rule.subcategory ? `<br><small style="color: #9CA3AF;">${rule.subcategory}</small>` : ''}
+            </td>
+            <td><span class="badge badge-warning">${rule.year}</span></td>
+            <td>${amountDisplay}</td>
+            <td>${maxDisplay}</td>
+            <td>
+              ${rule.legal_ref ? `<small style="color: #6B7280;">${rule.legal_ref}</small>` : '-'}
+            </td>
+            <td>
+              <span class="badge ${rule.is_active ? 'badge-success' : 'badge-danger'}">
+                ${rule.is_active ? 'Aktiv' : 'Inaktiv'}
+              </span>
+            </td>
+            <td>
+              <div class="actions">
+                <button class="action-btn toggle" onclick="editTaxRule('${rule.id}')">Bearbeiten</button>
+                <button class="action-btn toggle" onclick="duplicateTaxRule('${rule.id}')">Duplizieren</button>
+                <button class="action-btn delete" onclick="deleteTaxRule('${rule.id}')">Löschen</button>
+              </div>
+            </td>
+          </tr>
+        `;
+      }).join('');
+    }
+
+    function filterTaxRulesByYear(year) {
+      applyTaxRulesFilters();
+    }
+
+    function filterTaxRulesByCategory(category) {
+      applyTaxRulesFilters();
+    }
+
+    function applyTaxRulesFilters() {
+      const yearFilter = document.getElementById('taxRulesYearFilter').value;
+      const categoryFilter = document.getElementById('taxRulesCategoryFilter').value;
+
+      filteredTaxRules = allTaxRules.filter(rule => {
+        const matchYear = yearFilter === 'alle' || rule.year.toString() === yearFilter;
+        const matchCategory = categoryFilter === 'alle' || rule.category === categoryFilter;
+        return matchYear && matchCategory;
+      });
+
+      renderTaxRulesTable();
+    }
+
+    function openTaxRuleModal(ruleId = null) {
+      document.getElementById('taxRuleForm').reset();
+      document.getElementById('taxRuleId').value = '';
+      document.getElementById('taxRuleModalTitle').textContent = 'Neue Steuerregel';
+      document.getElementById('taxRuleModal').classList.remove('hidden');
+    }
+
+    function closeTaxRuleModal() {
+      document.getElementById('taxRuleModal').classList.add('hidden');
+    }
+
+    function editTaxRule(ruleId) {
+      const rule = allTaxRules.find(r => r.id === ruleId);
+      if (!rule) return;
+
+      document.getElementById('taxRuleModalTitle').textContent = 'Steuerregel bearbeiten';
+      document.getElementById('taxRuleId').value = rule.id;
+      document.getElementById('taxRuleKey').value = rule.rule_key || '';
+      document.getElementById('taxRuleDisplayName').value = rule.display_name || '';
+      document.getElementById('taxRuleCategory').value = rule.category || '';
+      document.getElementById('taxRuleSubcategory').value = rule.subcategory || '';
+      document.getElementById('taxRuleYear').value = rule.year || 2024;
+      document.getElementById('taxRuleIsActive').value = rule.is_active ? 'true' : 'false';
+      document.getElementById('taxRuleAmount').value = rule.amount || '';
+      document.getElementById('taxRuleAmountPerUnit').value = rule.amount_per_unit || '';
+      document.getElementById('taxRuleUnit').value = rule.unit || '';
+      document.getElementById('taxRuleMaxAmount').value = rule.max_amount || '';
+      document.getElementById('taxRuleMaxDays').value = rule.max_days || '';
+      document.getElementById('taxRulePercentage').value = rule.percentage || '';
+      document.getElementById('taxRuleDirectDeduction').checked = rule.direct_deduction || false;
+      document.getElementById('taxRuleThresholdAmount').value = rule.threshold_amount || '';
+      document.getElementById('taxRuleThresholdRate').value = rule.threshold_rate || '';
+      document.getElementById('taxRuleLegalRef').value = rule.legal_ref || '';
+      document.getElementById('taxRuleLegalRefUrl').value = rule.legal_ref_url || '';
+      document.getElementById('taxRuleRequiresReceipt').checked = rule.requires_receipt !== false;
+      document.getElementById('taxRuleRequiresBankTransfer').checked = rule.requires_bank_transfer || false;
+      document.getElementById('taxRuleRequiresInvoiceSplit').checked = rule.requires_invoice_split || false;
+      document.getElementById('taxRuleRequiresProfessionalUse').checked = rule.requires_professional_use || false;
+      document.getElementById('taxRuleShortDescription').value = rule.short_description || '';
+      document.getElementById('taxRuleDescription').value = rule.description || '';
+      document.getElementById('taxRuleKeywords').value = (rule.keywords || []).join(', ');
+
+      document.getElementById('taxRuleModal').classList.remove('hidden');
+    }
+
+    async function duplicateTaxRule(ruleId) {
+      const rule = allTaxRules.find(r => r.id === ruleId);
+      if (!rule) return;
+
+      const newYear = prompt('Für welches Jahr duplizieren?', (parseInt(rule.year) + 1).toString());
+      if (!newYear) return;
+
+      try {
+        const newRule = { ...rule };
+        delete newRule.id;
+        delete newRule.created_at;
+        delete newRule.updated_at;
+        newRule.year = parseInt(newYear);
+
+        const { error } = await supabaseClient
+          .from('tax_rules')
+          .insert(newRule);
+
+        if (error) throw error;
+
+        alert('Regel erfolgreich dupliziert für Jahr ' + newYear);
+        loadTaxRules();
+      } catch (error) {
+        alert('Fehler beim Duplizieren: ' + error.message);
+      }
+    }
+
+    async function saveTaxRule() {
+      const ruleId = document.getElementById('taxRuleId').value;
+      const keywordsStr = document.getElementById('taxRuleKeywords').value;
+      const keywords = keywordsStr ? keywordsStr.split(',').map(k => k.trim()).filter(k => k) : null;
+
+      const ruleData = {
+        rule_key: document.getElementById('taxRuleKey').value.trim(),
+        display_name: document.getElementById('taxRuleDisplayName').value.trim(),
+        category: document.getElementById('taxRuleCategory').value,
+        subcategory: document.getElementById('taxRuleSubcategory').value.trim() || null,
+        year: parseInt(document.getElementById('taxRuleYear').value),
+        is_active: document.getElementById('taxRuleIsActive').value === 'true',
+        amount: parseFloat(document.getElementById('taxRuleAmount').value) || null,
+        amount_per_unit: parseFloat(document.getElementById('taxRuleAmountPerUnit').value) || null,
+        unit: document.getElementById('taxRuleUnit').value || null,
+        max_amount: parseFloat(document.getElementById('taxRuleMaxAmount').value) || null,
+        max_days: parseInt(document.getElementById('taxRuleMaxDays').value) || null,
+        percentage: parseInt(document.getElementById('taxRulePercentage').value) || null,
+        direct_deduction: document.getElementById('taxRuleDirectDeduction').checked,
+        threshold_amount: parseFloat(document.getElementById('taxRuleThresholdAmount').value) || null,
+        threshold_rate: parseFloat(document.getElementById('taxRuleThresholdRate').value) || null,
+        legal_ref: document.getElementById('taxRuleLegalRef').value.trim() || null,
+        legal_ref_url: document.getElementById('taxRuleLegalRefUrl').value.trim() || null,
+        requires_receipt: document.getElementById('taxRuleRequiresReceipt').checked,
+        requires_bank_transfer: document.getElementById('taxRuleRequiresBankTransfer').checked,
+        requires_invoice_split: document.getElementById('taxRuleRequiresInvoiceSplit').checked,
+        requires_professional_use: document.getElementById('taxRuleRequiresProfessionalUse').checked,
+        short_description: document.getElementById('taxRuleShortDescription').value.trim() || null,
+        description: document.getElementById('taxRuleDescription').value.trim() || null,
+        keywords: keywords
+      };
+
+      if (!ruleData.rule_key || !ruleData.display_name || !ruleData.category) {
+        alert('Bitte fülle alle Pflichtfelder aus (Regel-Schlüssel, Anzeigename, Kategorie)');
+        return;
+      }
+
+      try {
+        let error;
+        if (ruleId) {
+          // Update existing
+          const result = await supabaseClient
+            .from('tax_rules')
+            .update(ruleData)
+            .eq('id', ruleId);
+          error = result.error;
+        } else {
+          // Insert new
+          const result = await supabaseClient
+            .from('tax_rules')
+            .insert(ruleData);
+          error = result.error;
+        }
+
+        if (error) throw error;
+
+        closeTaxRuleModal();
+        alert(ruleId ? 'Regel aktualisiert!' : 'Regel erstellt!');
+        loadTaxRules();
+      } catch (error) {
+        alert('Fehler beim Speichern: ' + error.message);
+      }
+    }
+
+    async function deleteTaxRule(ruleId) {
+      const rule = allTaxRules.find(r => r.id === ruleId);
+      if (!rule) return;
+
+      if (!confirm(`Regel "${rule.display_name}" (${rule.year}) wirklich löschen?`)) return;
+
+      try {
+        const { error } = await supabaseClient
+          .from('tax_rules')
+          .delete()
+          .eq('id', ruleId);
+
+        if (error) throw error;
+
+        alert('Regel gelöscht!');
+        loadTaxRules();
+      } catch (error) {
+        alert('Fehler beim Löschen: ' + error.message);
+      }
+    }
+
+    // Close tax rule modal on backdrop click
+    document.getElementById('taxRuleModal')?.addEventListener('click', (e) => {
+      if (e.target.id === 'taxRuleModal') {
+        closeTaxRuleModal();
+      }
+    });
+
+    // Load tax rules when switching to the tab
+    const originalSwitchTab = switchTab;
+    switchTab = function(tab) {
+      originalSwitchTab(tab);
+      if (tab === 'steuerregeln' && allTaxRules.length === 0) {
+        loadTaxRules();
+      }
+    };
 
     // Init
     checkAuth();
