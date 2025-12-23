@@ -2139,6 +2139,10 @@
           <span class="analysis-label">Verbesserung:</span>
           <span id="convSuggestion">-</span>
         </div>
+        <div class="analysis-item" id="convMaklerNotifiedContainer" style="display: none;">
+          <span class="analysis-label">Makler:</span>
+          <span class="status-badge status-termin_gebucht" id="convMaklerNotified" style="background: #10B981;">Benachrichtigt</span>
+        </div>
       </div>
       <div class="conversation-messages" id="conversationMessages">
         <div class="loading">Lade Nachrichten...</div>
@@ -3051,7 +3055,7 @@
         // Load all leads (including archived for filtering)
         const { data: leads, error: leadsError } = await supabaseClient
           .from('leads')
-          .select('id, name, email, phone, status, created_at, user_id, conversation_status, ai_quality_score, ai_improvement_suggestion, last_message_at, last_analyzed_at, is_archived')
+          .select('id, name, email, phone, status, created_at, user_id, conversation_status, ai_quality_score, ai_improvement_suggestion, last_message_at, last_analyzed_at, is_archived, makler_notified_at')
           .order('last_message_at', { ascending: false, nullsFirst: false });
 
         if (leadsError) throw leadsError;
@@ -3437,6 +3441,17 @@
         score >= 7 ? 'score-high' : score >= 4 ? 'score-medium' : 'score-low');
 
       document.getElementById('convSuggestion').textContent = lead.ai_improvement_suggestion || '-';
+
+      // Show Makler notification status if available
+      const maklerContainer = document.getElementById('convMaklerNotifiedContainer');
+      const maklerEl = document.getElementById('convMaklerNotified');
+      if (lead.makler_notified_at) {
+        maklerContainer.style.display = '';
+        const notifiedDate = new Date(lead.makler_notified_at).toLocaleString('de-DE');
+        maklerEl.textContent = 'Benachrichtigt am ' + notifiedDate;
+      } else {
+        maklerContainer.style.display = 'none';
+      }
 
       // Load messages
       const messagesDiv = document.getElementById('conversationMessages');
