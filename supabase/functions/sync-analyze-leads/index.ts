@@ -10,7 +10,7 @@ const corsHeaders = {
 const BATCH_SIZE = 20; // Increased because Gemini is faster
 
 // Self-invoke to continue processing in background
-async function continueInBackground(supabaseUrl: string, supabaseKey: string, jobId: string, forceAll: boolean, geminiApiKey?: string) {
+async function continueInBackground(supabaseUrl: string, supabaseKey: string, jobId: string, forceAll: boolean, geminiApiKey?: string, customPrompt?: string) {
   try {
     // Fire and forget - don't await
     fetch(`${supabaseUrl}/functions/v1/sync-analyze-leads`, {
@@ -22,7 +22,8 @@ async function continueInBackground(supabaseUrl: string, supabaseKey: string, jo
       body: JSON.stringify({
         job_id: jobId,
         force_all: forceAll,
-        gemini_api_key: geminiApiKey
+        gemini_api_key: geminiApiKey,
+        custom_prompt: customPrompt
       })
     }).catch(err => console.error('Background continuation failed:', err));
   } catch (e) {
@@ -41,7 +42,7 @@ serve(async (req) => {
 
     const supabase = createClient(supabaseUrl, supabaseKey);
 
-    const { force_all = false, job_id, gemini_api_key } = await req.json().catch(() => ({}));
+    const { force_all = false, job_id, gemini_api_key, custom_prompt } = await req.json().catch(() => ({}));
 
     // Use provided key or fallback to env var
     const geminiKey = gemini_api_key || Deno.env.get('GEMINI_API_KEY');
@@ -123,7 +124,7 @@ serve(async (req) => {
       }
 
       // Immediately start background processing (self-invoke)
-      continueInBackground(supabaseUrl, supabaseKey, job.id, force_all, geminiKey);
+      continueInBackground(supabaseUrl, supabaseKey, job.id, force_all, geminiKey, custom_prompt);
 
       return new Response(
         JSON.stringify({
@@ -172,18 +173,30 @@ serve(async (req) => {
     const locationIds = Object.keys(locationToName);
 
     // Get leads that still need analysis
-    let leadsQuery = supabase
+    // First get all leads, then filter in memory to avoid complex Supabase query issues
+    const { data: allLeadsRaw } = await supabase
       .from('leads')
       .select('id, ghl_location_id, name, email, phone, status, last_analyzed_at, last_message_at, conversation_status, is_archived')
-      .in('ghl_location_id', locationIds)
-      .or('is_archived.is.null,is_archived.eq.false');
+      .in('ghl_location_id', locationIds);
 
-    if (!force_all) {
-      // Only get leads that need analysis
-      leadsQuery = leadsQuery.or('last_analyzed_at.is.null,last_message_at.gt.last_analyzed_at');
-    }
+    // Filter leads in memory
+    let allLeads = (allLeadsRaw || []).filter(lead => {
+      // Skip archived leads
+      if (lead.is_archived === true) return false;
 
-    const { data: allLeads } = await leadsQuery.limit(BATCH_SIZE);
+      if (force_all) {
+        // For force_all: skip leads already analyzed in THIS job (started_at)
+        if (lead.last_analyzed_at && new Date(lead.last_analyzed_at) >= new Date(job.started_at)) {
+          return false;
+        }
+        return true;
+      } else {
+        // Normal mode: only leads that need re-analysis
+        if (!lead.last_analyzed_at) return true;
+        if (lead.last_message_at && new Date(lead.last_message_at) > new Date(lead.last_analyzed_at)) return true;
+        return false;
+      }
+    }).slice(0, BATCH_SIZE);
 
     if (!allLeads || allLeads.length === 0) {
       // All done!
@@ -228,11 +241,15 @@ serve(async (req) => {
     let analyzedCount = 0;
     let skippedCount = 0;
     let failedCount = 0;
+    let noResponseCount = 0;
 
-    // Separate leads with and without messages
-    // Filter out system messages (Opportunity created/updated)
+    // Separate leads into 3 categories:
+    // 1. No messages at all
+    // 2. Only outgoing messages (no response from lead)
+    // 3. Has incoming messages (can be analyzed)
     const leadsWithMessages: typeof allLeads = [];
     const leadsWithoutMessages: typeof allLeads = [];
+    const leadsNoResponse: typeof allLeads = [];
 
     for (const lead of allLeads) {
       const messages = messagesByLead[lead.id] || [];
@@ -244,13 +261,22 @@ serve(async (req) => {
       );
 
       if (realMessages.length === 0) {
+        // No messages at all
         leadsWithoutMessages.push(lead);
       } else {
-        leadsWithMessages.push(lead);
+        // Check if there are any INCOMING messages (from the lead)
+        const incomingMessages = realMessages.filter(m => m.type === 'incoming');
+        if (incomingMessages.length === 0) {
+          // Only outgoing messages - lead never responded
+          leadsNoResponse.push(lead);
+        } else {
+          // Has incoming messages - can be analyzed
+          leadsWithMessages.push(lead);
+        }
       }
     }
 
-    // Handle leads without messages (batch update)
+    // Handle leads without any messages (batch update)
     if (leadsWithoutMessages.length > 0) {
       const noMsgIds = leadsWithoutMessages.map(l => l.id);
       await supabase
@@ -258,9 +284,10 @@ serve(async (req) => {
         .update({
           last_analyzed_at: now,
           conversation_status: 'unterhaltung_laeuft',
+          ai_quality_score: null,
           ai_improvement_suggestion: JSON.stringify({
             status: 'no_messages',
-            summary: 'Noch keine Konversation - Erstkontakt herstellen',
+            zusammenfassung: 'Noch keine Konversation - Erstkontakt herstellen',
             simpli_platzierung: 'nicht',
             lead_interesse: 'kein',
             termin_status: 'kein',
@@ -273,8 +300,32 @@ serve(async (req) => {
       skippedCount = leadsWithoutMessages.length;
     }
 
-    // Detailed analysis prompt based on user's requirements
-    const analysisPrompt = `Du bist ein Senior Conversation-, Sales- und Funnel-Analyst mit Fokus auf Immobilien, Finanzierungsberatung und KI-gestützte Lead-Qualifizierung.
+    // Handle leads with NO RESPONSE (only outgoing messages)
+    if (leadsNoResponse.length > 0) {
+      const noResponseIds = leadsNoResponse.map(l => l.id);
+      await supabase
+        .from('leads')
+        .update({
+          last_analyzed_at: now,
+          conversation_status: 'unterhaltung_laeuft',
+          ai_quality_score: 1, // Lowest score - no engagement
+          ai_improvement_suggestion: JSON.stringify({
+            status: 'no_response',
+            zusammenfassung: 'Keine Antwort - Lead hat nicht reagiert',
+            simpli_platzierung: 'nicht',
+            lead_interesse: 'kein',
+            termin_status: 'kein',
+            gespraechs_status: 'offen',
+            follow_up: ['Erneut kontaktieren', 'Alternative Kontaktmethode versuchen'],
+            verbesserung: 'Lead erneut ansprechen oder andere Ansprache wählen'
+          })
+        })
+        .in('id', noResponseIds);
+      noResponseCount = leadsNoResponse.length;
+    }
+
+    // Default analysis prompt
+    const defaultPrompt = `Du bist ein Senior Conversation-, Sales- und Funnel-Analyst mit Fokus auf Immobilien, Finanzierungsberatung und KI-gestützte Lead-Qualifizierung.
 
 Der folgende Chat ist ein Gespräch zwischen einem Interessenten (Lead) und der KI des Maklers.
 Ziel der Makler-KI ist es, Simpli Finance (Finanzierungspartner) sinnvoll und glaubwürdig zu platzieren, sodass der Lead Interesse entwickelt und einen Termin buchen möchte.
@@ -320,6 +371,9 @@ Antworte NUR mit JSON (keine Markdown-Blöcke):
   "verbesserung": "Konkreter Verbesserungsvorschlag",
   "zusammenfassung": "Kurze Zusammenfassung"
 }`;
+
+    // Use custom prompt if provided, otherwise default
+    const analysisPrompt = custom_prompt || defaultPrompt;
 
     // Process leads with messages in PARALLEL using Gemini 2.0 Flash
     const analysisPromises = leadsWithMessages.map(async (lead) => {
@@ -457,12 +511,12 @@ Antworte NUR mit JSON (keine Markdown-Blöcke):
       }
     }
 
-    // Update job progress
+    // Update job progress (noResponseCount counts as skipped since they're not analyzed)
     const { data: updatedJob } = await supabase
       .from('analysis_jobs')
       .update({
         analyzed_leads: job.analyzed_leads + analyzedCount,
-        skipped_no_messages: job.skipped_no_messages + skippedCount,
+        skipped_no_messages: job.skipped_no_messages + skippedCount + noResponseCount,
         failed_leads: job.failed_leads + failedCount
       })
       .eq('id', job_id)
@@ -484,7 +538,7 @@ Antworte NUR mit JSON (keine Markdown-Blöcke):
         .eq('id', job_id);
     } else {
       // Continue processing in background (self-invoke)
-      continueInBackground(supabaseUrl, supabaseKey, job_id, force_all, geminiKey);
+      continueInBackground(supabaseUrl, supabaseKey, job_id, force_all, geminiKey, custom_prompt);
     }
 
     return new Response(
@@ -498,6 +552,7 @@ Antworte NUR mit JSON (keine Markdown-Blöcke):
         total_leads: job.total_leads,
         batch_analyzed: analyzedCount,
         batch_skipped: skippedCount,
+        batch_no_response: noResponseCount,
         batch_failed: failedCount,
         has_more: !isComplete
       }),

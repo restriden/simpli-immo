@@ -93,25 +93,30 @@ serve(async (req: Request) => {
       return jsonResponse({ questions: [], message: "No questions found in messages" });
     }
 
-    // Use Gemini to extract and group questions
+    // Create a map of lead_id to index for compact output
+    const uniqueLeadIds = [...new Set(potentialQuestions.map(m => m.lead_id))];
+    const leadIdToIndex: Record<string, number> = {};
+    uniqueLeadIds.forEach((id, idx) => { leadIdToIndex[id] = idx; });
+
+    // Use Gemini to extract and group questions with lead indices
     const questionsText = potentialQuestions
-      .map(m => `[Lead ${m.lead_id}]: ${m.content}`)
+      .map(m => `[${leadIdToIndex[m.lead_id]}]: ${m.content}`)
       .join("\n");
 
     const prompt = `Analysiere die folgenden Nachrichten von Immobilien-Interessenten und extrahiere die häufigsten Fragen.
 
 Gruppiere ähnliche Fragen zusammen und gib eine kurze, prägnante Zusammenfassung jeder Fragegruppe.
 
-Nachrichten:
+Nachrichten (Zahl in Klammern = Lead-Index):
 ${questionsText}
 
 Antworte NUR mit einem JSON-Array im folgenden Format (keine anderen Texte, kein Markdown):
 [
-  {"question": "Kurze Zusammenfassung", "count": 5, "leadIds": []},
+  {"question": "Kurze Zusammenfassung der Frage", "idx": [0, 2, 5]},
   ...
 ]
 
-WICHTIG: Setze leadIds immer auf leeres Array []. Maximal 10 Fragen. Sortiere nach count absteigend.`;
+idx = Array der Lead-Indizes die diese Frage gestellt haben. Maximal 10 Fragen. Sortiere nach Anzahl idx absteigend.`;
 
     const response = await fetch(
       `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${geminiApiKey}`,
@@ -182,14 +187,23 @@ WICHTIG: Setze leadIds immer auf leeres Array []. Maximal 10 Fragen. Sortiere na
       });
     }
 
-    // Validate and clean the questions
+    // Validate and clean the questions - convert indices back to lead IDs
     questions = questions
-      .filter(q => q.question && typeof q.count === "number")
-      .map(q => ({
-        question: q.question.substring(0, 200), // Limit length
-        count: Math.max(1, Math.min(q.count, 100)), // Reasonable bounds
-        leadIds: Array.isArray(q.leadIds) ? q.leadIds.slice(0, 10) : []
-      }))
+      .filter(q => q.question && (Array.isArray(q.idx) || typeof q.count === "number"))
+      .map(q => {
+        // Convert indices to actual lead IDs
+        const indices = Array.isArray(q.idx) ? q.idx : [];
+        const resolvedLeadIds = indices
+          .filter((i: number) => i >= 0 && i < uniqueLeadIds.length)
+          .map((i: number) => uniqueLeadIds[i]);
+
+        return {
+          question: q.question.substring(0, 200), // Limit length
+          count: resolvedLeadIds.length || q.count || 1,
+          leadIds: resolvedLeadIds.slice(0, 20) // Limit to 20 leads per question
+        };
+      })
+      .filter(q => q.count > 0)
       .sort((a, b) => b.count - a.count)
       .slice(0, 15);
 
