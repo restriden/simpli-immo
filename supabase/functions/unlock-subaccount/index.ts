@@ -4,6 +4,10 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") || "";
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || "";
 const GHL_API_BASE = "https://services.leadconnectorhq.com";
+const GHL_CLIENT_ID = "69432ebdab47804bce51b78a-mjalsvpx";
+const GHL_CLIENT_SECRET = Deno.env.get("GHL_CLIENT_SECRET") || "";
+const GHL_TOKEN_URL = "https://services.leadconnectorhq.com/oauth/token";
+const GHL_AGENCY_API_KEY = Deno.env.get("GHL_AGENCY_API_KEY") || "";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -64,12 +68,19 @@ serve(async (req: Request) => {
 
     console.log("Found connection:", connection.location_name);
 
-    // 2. Fetch users from GHL API
+    // 2. Ensure token is valid (refresh if needed)
+    const validConnection = await ensureValidToken(supabase, connection);
+
+    // 3. Fetch users from GHL API
+    // Use Agency API key for /users/ endpoint as it requires company-level access
+    const apiToken = GHL_AGENCY_API_KEY || validConnection.access_token;
+    console.log("Using API token type:", GHL_AGENCY_API_KEY ? "Agency API Key" : "Connection Token");
+
     const ghlResponse = await fetch(
       `${GHL_API_BASE}/users/?locationId=${location_id}`,
       {
         headers: {
-          Authorization: `Bearer ${connection.access_token}`,
+          Authorization: `Bearer ${apiToken}`,
           Version: "2021-07-28",
           Accept: "application/json",
         },
@@ -194,6 +205,88 @@ serve(async (req: Request) => {
     return jsonResponse({ error: error.message }, 500);
   }
 });
+
+interface GHLConnection {
+  id: string;
+  user_id: string;
+  location_id: string;
+  access_token: string;
+  refresh_token: string;
+  token_expires_at: string;
+  is_active: boolean;
+  location_name?: string;
+}
+
+async function ensureValidToken(
+  supabase: any,
+  connection: GHLConnection
+): Promise<GHLConnection> {
+  // Skip token refresh for agency key connections
+  if (connection.refresh_token === 'AGENCY_KEY' || !connection.refresh_token || !connection.token_expires_at) {
+    console.log(`Using agency key for location ${connection.location_id} - no refresh needed`);
+    return connection;
+  }
+
+  const expiresAt = new Date(connection.token_expires_at);
+  const now = new Date();
+
+  // Refresh if token expires in less than 5 minutes
+  const fiveMinutesFromNow = new Date(now.getTime() + 5 * 60 * 1000);
+
+  if (expiresAt <= fiveMinutesFromNow) {
+    console.log(`Refreshing token for location ${connection.location_id}`);
+
+    const response = await fetch(GHL_TOKEN_URL, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded",
+        Accept: "application/json",
+      },
+      body: new URLSearchParams({
+        client_id: GHL_CLIENT_ID,
+        client_secret: GHL_CLIENT_SECRET,
+        grant_type: "refresh_token",
+        refresh_token: connection.refresh_token,
+      }),
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error("Token refresh failed:", errorText);
+
+      // Mark connection as inactive if refresh fails
+      await supabase
+        .from("ghl_connections")
+        .update({ is_active: false })
+        .eq("id", connection.id);
+
+      throw new Error("Token refresh failed - connection deactivated");
+    }
+
+    const tokens = await response.json();
+    const newExpiresAt = new Date();
+    newExpiresAt.setSeconds(newExpiresAt.getSeconds() + tokens.expires_in);
+
+    // Update tokens in database
+    await supabase
+      .from("ghl_connections")
+      .update({
+        access_token: tokens.access_token,
+        refresh_token: tokens.refresh_token,
+        token_expires_at: newExpiresAt.toISOString(),
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", connection.id);
+
+    connection.access_token = tokens.access_token;
+    connection.refresh_token = tokens.refresh_token;
+    connection.token_expires_at = newExpiresAt.toISOString();
+
+    console.log("Token refreshed successfully");
+  }
+
+  return connection;
+}
 
 function jsonResponse(data: any, status = 200) {
   return new Response(JSON.stringify(data), {

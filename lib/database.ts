@@ -14,6 +14,108 @@ export interface Objekt {
   ai_ready: boolean;
   created_at: string;
   updated_at: string;
+  // Stammdaten
+  strasse?: string;
+  hausnummer?: string;
+  plz?: string;
+  grundstueck_qm?: number;
+  nutzflaeche_qm?: number;
+  baujahr?: number;
+  objektart?: 'efh' | 'dhh' | 'rh' | 'mfh' | 'etw' | 'grundstueck' | 'gewerbe' | 'sonstiges';
+  etage?: number;
+  stockwerke_gesamt?: number;
+  // Technische Daten
+  energieausweis_typ?: 'bedarfsausweis' | 'verbrauchsausweis' | 'nicht_vorhanden';
+  energiekennwert?: number;
+  energieeffizienzklasse?: 'A+' | 'A' | 'B' | 'C' | 'D' | 'E' | 'F' | 'G' | 'H';
+  heizungsart?: 'gas' | 'oel' | 'waermepumpe' | 'fernwaerme' | 'pellets' | 'elektro' | 'solar' | 'sonstiges';
+  heizung_baujahr?: number;
+  letzte_modernisierung_jahr?: number;
+  letzte_modernisierung_art?: string;
+  fenster_material?: 'kunststoff' | 'holz' | 'alu' | 'holz_alu' | 'sonstiges';
+  fenster_baujahr?: number;
+  dach_material?: 'ziegel' | 'beton' | 'schiefer' | 'metall' | 'flachdach' | 'sonstiges';
+  dach_baujahr?: number;
+  keller?: boolean;
+  keller_beheizt?: boolean;
+  garage_stellplatz?: 'keine' | 'garage' | 'carport' | 'stellplatz' | 'tiefgarage' | 'duplex';
+  // Rechtliches
+  grundbuch_belastungen?: string;
+  baulasten?: string;
+  denkmalschutz?: boolean;
+  erbbaurecht?: boolean;
+  erbbaurecht_details?: string;
+  // ETW-spezifisch
+  hausgeld_monatlich?: number;
+  instandhaltungsruecklage?: number;
+  sonderumlagen_geplant?: boolean;
+  sonderumlagen_details?: string;
+  einheiten_im_haus?: number;
+  // Finanzierung
+  provision_prozent?: number;
+  grunderwerbsteuer_prozent?: number;
+  notar_grundbuch_prozent?: number;
+  // Dokumente & Vollständigkeit
+  dokumente?: Array<{name: string; type: string; uploaded_at: string; url: string}>;
+  vollstaendigkeit_prozent?: number;
+}
+
+// Pflichtfelder für Finanzierung - Gewichtung für Vollständigkeitsberechnung
+export const FINANZIERUNG_PFLICHTFELDER = {
+  // Stammdaten (40%)
+  strasse: 4,
+  plz: 4,
+  city: 4,
+  grundstueck_qm: 4,
+  area_sqm: 4,
+  baujahr: 5,
+  objektart: 5,
+  rooms: 3,
+  price: 7,
+  // Technische Daten (35%)
+  energieausweis_typ: 8,
+  energiekennwert: 7,
+  energieeffizienzklasse: 5,
+  heizungsart: 5,
+  heizung_baujahr: 5,
+  dach_material: 2,
+  fenster_material: 2,
+  keller: 1,
+  // Rechtliches (15%)
+  grundbuch_belastungen: 5,
+  baulasten: 5,
+  denkmalschutz: 2,
+  erbbaurecht: 3,
+  // Finanzierung (10%)
+  provision_prozent: 5,
+  grunderwerbsteuer_prozent: 5,
+};
+
+export function berechneVollstaendigkeit(objekt: Objekt): number {
+  let erreicht = 0;
+  let gesamt = 0;
+
+  for (const [feld, gewicht] of Object.entries(FINANZIERUNG_PFLICHTFELDER)) {
+    gesamt += gewicht;
+    const wert = objekt[feld as keyof Objekt];
+    if (wert !== null && wert !== undefined && wert !== '') {
+      erreicht += gewicht;
+    }
+  }
+
+  // ETW-spezifische Felder
+  if (objekt.objektart === 'etw') {
+    const etwFelder = { hausgeld_monatlich: 5, instandhaltungsruecklage: 5, einheiten_im_haus: 3 };
+    for (const [feld, gewicht] of Object.entries(etwFelder)) {
+      gesamt += gewicht;
+      const wert = objekt[feld as keyof Objekt];
+      if (wert !== null && wert !== undefined && wert !== '') {
+        erreicht += gewicht;
+      }
+    }
+  }
+
+  return Math.round((erreicht / gesamt) * 100);
 }
 
 export interface Lead {

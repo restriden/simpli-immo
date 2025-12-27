@@ -13,9 +13,58 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useFocusEffect } from 'expo-router';
 import { Feather } from '@expo/vector-icons';
+import Svg, { Circle } from 'react-native-svg';
 import { useAuth } from '../../lib/auth';
-import { getObjekte, mergeObjekte, Objekt } from '../../lib/database';
+import { getObjekte, mergeObjekte, Objekt, berechneVollstaendigkeit } from '../../lib/database';
 import { checkCRMConnection } from '../../lib/crm';
+
+// Vollständigkeits-Kreis Komponente
+const CompletenessCircle = ({ percent }: { percent: number }) => {
+  const size = 44;
+  const strokeWidth = 4;
+  const radius = (size - strokeWidth) / 2;
+  const circumference = radius * 2 * Math.PI;
+  const strokeDashoffset = circumference - (percent / 100) * circumference;
+
+  // Farbe basierend auf Prozent
+  const getColor = () => {
+    if (percent >= 80) return '#22C55E'; // Grün
+    if (percent >= 50) return '#F97316'; // Orange
+    return '#EF4444'; // Rot
+  };
+
+  return (
+    <View style={{ width: size, height: size, alignItems: 'center', justifyContent: 'center' }}>
+      <Svg width={size} height={size} style={{ position: 'absolute' }}>
+        {/* Hintergrund-Kreis */}
+        <Circle
+          cx={size / 2}
+          cy={size / 2}
+          r={radius}
+          stroke="#E5E7EB"
+          strokeWidth={strokeWidth}
+          fill="transparent"
+        />
+        {/* Fortschritts-Kreis */}
+        <Circle
+          cx={size / 2}
+          cy={size / 2}
+          r={radius}
+          stroke={getColor()}
+          strokeWidth={strokeWidth}
+          fill="transparent"
+          strokeDasharray={circumference}
+          strokeDashoffset={strokeDashoffset}
+          strokeLinecap="round"
+          transform={`rotate(-90 ${size / 2} ${size / 2})`}
+        />
+      </Svg>
+      <Text style={{ fontSize: 11, fontFamily: 'DMSans-Bold', color: getColor() }}>
+        {percent}%
+      </Text>
+    </View>
+  );
+};
 
 export default function ObjekteScreen() {
   const { user } = useAuth();
@@ -258,8 +307,12 @@ export default function ObjekteScreen() {
                 </Text>
               </View>
             </View>
-            
-            <Feather name="chevron-right" size={20} color="#D1D5DB" />
+
+            {/* Vollständigkeits-Kreis */}
+            <View style={styles.completenessContainer}>
+              <CompletenessCircle percent={berechneVollstaendigkeit(objekt)} />
+              <Feather name="chevron-right" size={20} color="#D1D5DB" style={{ marginLeft: 8 }} />
+            </View>
           </TouchableOpacity>
         ))}
 
@@ -436,6 +489,7 @@ const styles = StyleSheet.create({
   objektRooms: { fontSize: 12, fontFamily: 'DMSans-Regular', color: '#9CA3AF' },
   objektFooter: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 8 },
   objektPrice: { fontSize: 16, fontFamily: 'DMSans-Bold', color: '#111827' },
+  completenessContainer: { flexDirection: 'row', alignItems: 'center' },
 
   // Merge Modal styles
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' },
