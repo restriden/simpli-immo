@@ -7,10 +7,12 @@ interface AuthContextType {
   user: User | null;
   profile: Profile | null;
   loading: boolean;
+  mustChangePassword: boolean;
   signIn: (email: string, password: string) => Promise<{ error: Error | null }>;
   signUp: (email: string, password: string, fullName: string, companyName: string) => Promise<{ error: Error | null }>;
   signOut: () => Promise<void>;
   refreshProfile: () => Promise<void>;
+  clearMustChangePassword: () => void;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -20,6 +22,19 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [profile, setProfile] = useState<Profile | null>(null);
   const [loading, setLoading] = useState(true);
+  const [mustChangePassword, setMustChangePassword] = useState(false);
+
+  const checkMustChangePassword = (currentUser: User | null) => {
+    if (currentUser?.user_metadata?.must_change_password === true) {
+      setMustChangePassword(true);
+    } else {
+      setMustChangePassword(false);
+    }
+  };
+
+  const clearMustChangePassword = () => {
+    setMustChangePassword(false);
+  };
 
   const fetchProfile = async (userId: string) => {
     const { data, error } = await supabase
@@ -48,6 +63,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       console.log('[DEBUG AUTH] getSession result - session:', session ? 'exists' : 'null', 'user.id:', session?.user?.id);
       setSession(session);
       setUser(session?.user ?? null);
+      checkMustChangePassword(session?.user ?? null);
       if (session?.user) {
         fetchProfile(session.user.id).then(setProfile);
       }
@@ -59,6 +75,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         console.log('[DEBUG AUTH] onAuthStateChange - event:', event, 'user.id:', session?.user?.id);
         setSession(session);
         setUser(session?.user ?? null);
+        checkMustChangePassword(session?.user ?? null);
         if (session?.user) {
           const profileData = await fetchProfile(session.user.id);
           setProfile(profileData);
@@ -97,7 +114,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   };
 
   return (
-    <AuthContext.Provider value={{ session, user, profile, loading, signIn, signUp, signOut, refreshProfile }}>
+    <AuthContext.Provider value={{ session, user, profile, loading, mustChangePassword, signIn, signUp, signOut, refreshProfile, clearMustChangePassword }}>
       {children}
     </AuthContext.Provider>
   );

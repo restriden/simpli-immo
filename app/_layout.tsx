@@ -8,7 +8,7 @@ import { AuthProvider, useAuth } from '../lib/auth';
 SplashScreen.preventAutoHideAsync();
 
 function AuthGuard({ children }: { children: React.ReactNode }) {
-  const { session, loading } = useAuth();
+  const { session, loading, mustChangePassword } = useAuth();
   const segments = useSegments();
   const router = useRouter();
 
@@ -16,13 +16,22 @@ function AuthGuard({ children }: { children: React.ReactNode }) {
     if (loading) return;
 
     const inAuthGroup = segments[0] === '(auth)';
+    const inChangePassword = segments[0] === 'change-password';
 
     if (!session && !inAuthGroup) {
       router.replace('/(auth)/login');
     } else if (session && inAuthGroup) {
-      router.replace('/(tabs)');
+      // After login, check if password change is required
+      if (mustChangePassword) {
+        router.replace('/change-password');
+      } else {
+        router.replace('/(tabs)');
+      }
+    } else if (session && mustChangePassword && !inChangePassword) {
+      // Force redirect to change password if required
+      router.replace('/change-password');
     }
-  }, [session, loading, segments]);
+  }, [session, loading, segments, mustChangePassword]);
 
   return <>{children}</>;
 }
@@ -52,6 +61,7 @@ export default function RootLayout() {
         <Stack screenOptions={{ headerShown: false }}>
           <Stack.Screen name="(auth)" />
           <Stack.Screen name="(tabs)" />
+          <Stack.Screen name="change-password" options={{ gestureEnabled: false }} />
           <Stack.Screen name="voice-assistant" options={{ presentation: 'fullScreenModal', animation: 'fade' }} />
         </Stack>
       </AuthGuard>
