@@ -6,29 +6,48 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
+// Own Account Location IDs - Subaccounts die uns gehören (nicht Makler-Kunden)
+// Diese werden NICHT analysiert da es eigene Kunden sind
+const OWN_ACCOUNT_LOCATION_IDS: string[] = [
+  "iDLo7b4WOOCkE9voshIM", // Simpli Finance GmbH
+  "dI8ofFbKIogmLSUTvTFn", // simpli.immo
+  "MAMK21fjL4Z52qgcvpgq", // simpli.bot
+];
+
+function isOwnAccount(locationId: string | null): boolean {
+  if (!locationId) return false;
+  return OWN_ACCOUNT_LOCATION_IDS.includes(locationId);
+}
+
 // Batch size - process this many leads per function call
 const BATCH_SIZE = 20; // Increased because Gemini is faster
 
-// Self-invoke to continue processing in background
-async function continueInBackground(supabaseUrl: string, supabaseKey: string, jobId: string, forceAll: boolean, geminiApiKey?: string, customPrompt?: string) {
-  try {
-    // Fire and forget - don't await
-    fetch(`${supabaseUrl}/functions/v1/sync-analyze-leads`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${supabaseKey}`,
-      },
-      body: JSON.stringify({
-        job_id: jobId,
-        force_all: forceAll,
-        gemini_api_key: geminiApiKey,
-        custom_prompt: customPrompt
-      })
-    }).catch(err => console.error('Background continuation failed:', err));
-  } catch (e) {
-    console.error('Failed to trigger background continuation:', e);
-  }
+// Self-invoke to continue processing in background (fire-and-forget with logging)
+function continueInBackground(supabaseUrl: string, supabaseKey: string, jobId: string, forceAll: boolean, geminiApiKey?: string, customPrompt?: string) {
+  console.log(`Triggering background continuation for job ${jobId}`);
+
+  // Fire and forget - don't await, but log errors
+  fetch(`${supabaseUrl}/functions/v1/sync-analyze-leads`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${supabaseKey}`,
+    },
+    body: JSON.stringify({
+      job_id: jobId,
+      force_all: forceAll,
+      gemini_api_key: geminiApiKey,
+      custom_prompt: customPrompt
+    })
+  }).then(response => {
+    if (!response.ok) {
+      console.error(`Background continuation returned status ${response.status}`);
+    } else {
+      console.log(`Background continuation triggered successfully for job ${jobId}`);
+    }
+  }).catch(err => {
+    console.error(`Background continuation failed for job ${jobId}:`, err);
+  });
 }
 
 serve(async (req) => {
@@ -42,7 +61,7 @@ serve(async (req) => {
 
     const supabase = createClient(supabaseUrl, supabaseKey);
 
-    const { force_all = false, job_id, gemini_api_key, custom_prompt } = await req.json().catch(() => ({}));
+    const { force_all = false, job_id, gemini_api_key, custom_prompt, lead_id } = await req.json().catch(() => ({}));
 
     // Use provided key or fallback to env var
     const geminiKey = gemini_api_key || Deno.env.get('GEMINI_API_KEY');
@@ -52,6 +71,307 @@ serve(async (req) => {
         JSON.stringify({ success: false, error: 'GEMINI_API_KEY nicht konfiguriert. Bitte in SimpliOS unter Einstellungen > APIs eingeben.' }),
         { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 400 }
       );
+    }
+
+    // ============ MODE 0: SINGLE LEAD ANALYSIS (triggered by webhook) ============
+    if (lead_id) {
+      console.log('Single lead analysis triggered for:', lead_id);
+
+      // Get the lead
+      const { data: lead, error: leadError } = await supabase
+        .from('leads')
+        .select('id, ghl_location_id, name, email, phone, status, is_archived')
+        .eq('id', lead_id)
+        .single();
+
+      if (leadError || !lead) {
+        return new Response(
+          JSON.stringify({ success: false, error: 'Lead nicht gefunden' }),
+          { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 404 }
+        );
+      }
+
+      if (lead.is_archived) {
+        return new Response(
+          JSON.stringify({ success: true, message: 'Lead ist archiviert, wird nicht analysiert' }),
+          { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        );
+      }
+
+      // Skip analysis for own account leads (Simpli.bot, Simpli Immo, Simpli Finance)
+      if (isOwnAccount(lead.ghl_location_id)) {
+        console.log('Skipping analysis for own account lead:', lead.ghl_location_id);
+        return new Response(
+          JSON.stringify({ success: true, message: 'Eigener Account - keine Analyse erforderlich', skipped: true }),
+          { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        );
+      }
+
+      // Get messages for this lead
+      const { data: messages } = await supabase
+        .from('messages')
+        .select('id, content, type, created_at')
+        .eq('lead_id', lead_id)
+        .order('created_at', { ascending: true });
+
+      // Filter out system messages
+      const realMessages = (messages || []).filter(m =>
+        m.content &&
+        !m.content.startsWith('Opportunity created') &&
+        !m.content.startsWith('Opportunity updated')
+      );
+
+      const now = new Date().toISOString();
+      const today = new Date();
+      const todayStr = today.toISOString().split('T')[0];
+
+      // Check if lead has any messages
+      if (realMessages.length === 0) {
+        await supabase
+          .from('leads')
+          .update({
+            last_analyzed_at: now,
+            conversation_status: 'unterhaltung_laeuft',
+            ai_quality_score: null,
+            ai_improvement_suggestion: JSON.stringify({
+              status: 'no_messages',
+              zusammenfassung: 'Noch keine Konversation - Erstkontakt herstellen',
+              sf_pitch: 'nein',
+              sf_interesse: 'nein',
+              sf_termin: 'nein',
+              besichtigung: 'nein',
+              follow_up_reason: 'Erstkontakt muss hergestellt werden',
+              follow_up_date: null,
+              follow_up_message: null
+            })
+          })
+          .eq('id', lead_id);
+
+        return new Response(
+          JSON.stringify({ success: true, message: 'Keine Nachrichten zum Analysieren' }),
+          { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        );
+      }
+
+      // Check if there are any incoming messages (from the lead)
+      const incomingMessages = realMessages.filter(m => m.type === 'incoming');
+      if (incomingMessages.length === 0) {
+        await supabase
+          .from('leads')
+          .update({
+            last_analyzed_at: now,
+            conversation_status: 'unterhaltung_laeuft',
+            ai_quality_score: 1,
+            ai_improvement_suggestion: JSON.stringify({
+              status: 'no_response',
+              zusammenfassung: 'Keine Antwort - Lead hat nicht reagiert',
+              sf_pitch: 'nein',
+              sf_interesse: 'nein',
+              sf_termin: 'nein',
+              besichtigung: 'nein',
+              follow_up_reason: 'Lead hat nicht geantwortet - erneut kontaktieren',
+              follow_up_date: null,
+              follow_up_message: null
+            })
+          })
+          .eq('id', lead_id);
+
+        return new Response(
+          JSON.stringify({ success: true, message: 'Lead hat noch nicht geantwortet' }),
+          { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        );
+      }
+
+      // Build conversation text (limit to last 50 messages)
+      const recentMessages = realMessages.slice(-50);
+      const conversationText = recentMessages.map(m => {
+        const role = m.type === 'incoming' ? 'Kunde' : 'KI/Makler';
+        return `${role}: ${m.content}`;
+      }).join('\n');
+
+      // Default analysis prompt
+      const analysisPrompt = custom_prompt || `Du bist ein Conversation-Analyst für Immobilien und Finanzierungsberatung.
+
+Der Chat ist zwischen einem Interessenten (Lead) und der KI eines Maklers.
+Ziel: Simpli Finance (Finanzierungspartner) platzieren und Termine vermitteln.
+
+HEUTIGES DATUM: ${todayStr}
+
+KONVERSATION:
+${conversationText}
+
+Analysiere folgende Kategorien:
+
+1. SF_PITCH - Wurde Simpli Finance im Gespräch erwähnt/vorgestellt?
+   - ja: SF wurde klar vorgestellt mit Mehrwert
+   - teilweise: SF erwähnt aber nicht gut erklärt
+   - nein: SF wurde nicht erwähnt
+
+2. SF_INTERESSE - Zeigt der Lead Interesse an Finanzierungsberatung durch Simpli Finance?
+   - ja: Klares Interesse, Nachfragen zur Finanzierung
+   - vielleicht: Unklares/latentes Interesse
+   - nein: Kein Interesse an Finanzierungshilfe
+
+3. SF_TERMIN - Status bezüglich Termin mit Simpli Finance Berater:
+   - gebucht: Beratungstermin mit SF ist vereinbart
+   - interesse: Lead zeigt Interesse an SF-Termin
+   - nein: Kein SF-Termin-Interesse
+
+4. BESICHTIGUNG - Status bezüglich Besichtigungstermin:
+   - gebucht: Besichtigung ist vereinbart
+   - interesse: Lead will besichtigen
+   - nein: Keine Besichtigung geplant
+
+5. MAKLER_TERMIN - Hat der Lead einen Termin beim Makler (Besichtigung ODER Telefontermin)?
+   - gebucht: Termin ist vereinbart (Besichtigung, Telefonat, oder anderer Termin)
+   - makler_meldet_sich: Makler soll sich melden um Termin zu vereinbaren
+   - interesse: Lead zeigt Interesse an einem Termin
+   - nein: Kein Termin vereinbart oder geplant
+
+6. ZUSAMMENFASSUNG - 1-2 Sätze: Was ist passiert? Was ist der aktuelle Stand?
+
+7. FOLLOW_UP_REASON - Warum braucht dieser Lead ein Follow-up? Oder warum nicht?
+   Falls kein Follow-up nötig (z.B. Termin bereits gebucht, kein Interesse): Erkläre warum.
+
+8. FOLLOW_UP_DATE - Datum für Follow-up (YYYY-MM-DD) oder null wenn keins nötig.
+   Regeln: Nicht am Wochenende. Dringend = 1-2 Tage, Normal = 3-5 Tage.
+
+9. FOLLOW_UP_MESSAGE - WhatsApp-Nachricht für Follow-up (oder null wenn keins nötig):
+
+   ANREDE: Analysiere ausgehende Nachrichten - wenn "Sie" verwendet wurde → siezen, wenn "du" → duzen.
+
+   STIL:
+   - Menschlich, warm, authentisch
+   - 2-3 kurze Sätze
+   - Bezug auf das Gespräch (Objekt, Situation)
+   - KEINE Floskeln ("Ich hoffe es geht Ihnen gut")
+   - Echten Mehrwert liefern
+
+   SIMPLI FINANCE INFOS (nutze passend):
+   - Netzwerk aus Top-Finanzierungsexperten
+   - Kostenlos für Käufer, unabhängig
+   - 24h-Finanzierungscheck für Klarheit
+   - Käufer wissen VOR Besichtigung was sie sich leisten können
+
+Antworte NUR mit JSON:
+{
+  "sf_pitch": "ja|teilweise|nein",
+  "sf_interesse": "ja|vielleicht|nein",
+  "sf_termin": "gebucht|interesse|nein",
+  "besichtigung": "gebucht|interesse|nein",
+  "makler_termin": "gebucht|makler_meldet_sich|interesse|nein",
+  "zusammenfassung": "Kurze Zusammenfassung",
+  "follow_up_reason": "Warum Follow-up nötig/nicht nötig",
+  "follow_up_date": "YYYY-MM-DD oder null",
+  "follow_up_message": "Nachricht oder null"
+}`;
+
+      try {
+        // Call Gemini 2.0 Flash
+        const analysisResponse = await fetch(
+          `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${geminiKey}`,
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              contents: [{
+                parts: [{ text: analysisPrompt }]
+              }],
+              generationConfig: {
+                temperature: 0.1,
+                maxOutputTokens: 1000
+              }
+            })
+          }
+        );
+
+        if (!analysisResponse.ok) {
+          const errorText = await analysisResponse.text();
+          console.error('Gemini API error:', errorText);
+          return new Response(
+            JSON.stringify({ success: false, error: 'Gemini API Fehler' }),
+            { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 500 }
+          );
+        }
+
+        const analysisData = await analysisResponse.json();
+        const content = analysisData.candidates?.[0]?.content?.parts?.[0]?.text || '';
+
+        // Clean up markdown and extract JSON
+        const cleanedContent = content
+          .replace(/```json\s*/gi, '')
+          .replace(/```\s*/g, '')
+          .trim();
+
+        const jsonMatch = cleanedContent.match(/\{[\s\S]*\}/);
+
+        if (!jsonMatch) {
+          console.error('No JSON in Gemini response:', content);
+          return new Response(
+            JSON.stringify({ success: false, error: 'Ungültige Gemini Antwort' }),
+            { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 500 }
+          );
+        }
+
+        const analysis = JSON.parse(jsonMatch[0]);
+
+        // Map analysis to database fields
+        // SF Termin gebucht = abgeschlossen, sonst läuft noch
+        const conversationStatus = analysis.sf_termin === 'gebucht'
+          ? 'abgeschlossen'
+          : 'unterhaltung_laeuft';
+
+        // Calculate quality score (1-10)
+        let score = 5;
+        // SF Pitch
+        if (analysis.sf_pitch === 'ja') score += 2;
+        else if (analysis.sf_pitch === 'teilweise') score += 1;
+        else score -= 1;
+        // SF Interesse
+        if (analysis.sf_interesse === 'ja') score += 2;
+        else if (analysis.sf_interesse === 'vielleicht') score += 1;
+        else score -= 1;
+        // SF Termin (wichtigster Faktor)
+        if (analysis.sf_termin === 'gebucht') score += 3;
+        else if (analysis.sf_termin === 'interesse') score += 1;
+        // Besichtigung
+        if (analysis.besichtigung === 'gebucht') score += 2;
+        else if (analysis.besichtigung === 'interesse') score += 1;
+        const qualityScore = Math.max(1, Math.min(10, score));
+
+        // Update the lead
+        await supabase
+          .from('leads')
+          .update({
+            last_analyzed_at: now,
+            conversation_status: conversationStatus,
+            has_makler_termin: analysis.makler_termin === 'gebucht' || analysis.makler_termin === 'makler_meldet_sich',
+            simpli_platziert: analysis.sf_pitch !== 'nein',
+            simpli_interessiert: analysis.sf_interesse !== 'nein',
+            ai_quality_score: qualityScore,
+            ai_improvement_suggestion: JSON.stringify(analysis)
+          })
+          .eq('id', lead_id);
+
+        console.log('Single lead analysis completed for:', lead_id, 'Score:', qualityScore);
+
+        return new Response(
+          JSON.stringify({
+            success: true,
+            lead_id,
+            analysis,
+            quality_score: qualityScore
+          }),
+          { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        );
+
+      } catch (analysisError) {
+        console.error('Analysis error for lead', lead_id, analysisError);
+        return new Response(
+          JSON.stringify({ success: false, error: 'Analyse-Fehler: ' + analysisError.message }),
+          { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 500 }
+        );
+      }
     }
 
     // ============ MODE 1: START NEW JOB ============
@@ -84,16 +404,17 @@ serve(async (req) => {
         );
       }
 
-      // Filter leads
-      let leads = (allLeads || []).filter(lead => !lead.is_archived);
+      // Filter leads - always analyze ALL Makler leads (not just new ones)
+      let leads = (allLeads || []).filter(lead => {
+        // Skip archived leads
+        if (lead.is_archived) return false;
+        // Skip own account leads (Simpli.bot, Simpli Immo, Simpli Finance)
+        if (isOwnAccount(lead.ghl_location_id)) return false;
+        return true;
+      });
 
-      if (!force_all) {
-        leads = leads.filter(lead => {
-          if (!lead.last_analyzed_at) return true;
-          if (lead.last_message_at && new Date(lead.last_message_at) > new Date(lead.last_analyzed_at)) return true;
-          return false;
-        });
-      }
+      // Note: We now always analyze all leads by default (like force_all)
+      // The old behavior filtered to only new/updated leads, but this caused issues
 
       if (leads.length === 0) {
         return new Response(
@@ -171,53 +492,94 @@ serve(async (req) => {
     });
 
     const locationIds = Object.keys(locationToName);
+    console.log(`Job ${job_id}: ${connections?.length || 0} active connections, ${locationIds.length} location IDs`);
 
     // Get leads that still need analysis
     // First get all leads, then filter in memory to avoid complex Supabase query issues
+    // Use ORDER BY id to ensure consistent ordering across batches
     const { data: allLeadsRaw } = await supabase
       .from('leads')
       .select('id, ghl_location_id, name, email, phone, status, last_analyzed_at, last_message_at, conversation_status, is_archived')
-      .in('ghl_location_id', locationIds);
+      .in('ghl_location_id', locationIds)
+      .order('id', { ascending: true });
 
-    // Filter leads in memory
-    let allLeads = (allLeadsRaw || []).filter(lead => {
+    // Filter leads in memory - always analyze all leads (skip only those already done in THIS job)
+    const filteredLeads = (allLeadsRaw || []).filter(lead => {
       // Skip archived leads
       if (lead.is_archived === true) return false;
 
-      if (force_all) {
-        // For force_all: skip leads already analyzed in THIS job (started_at)
-        if (lead.last_analyzed_at && new Date(lead.last_analyzed_at) >= new Date(job.started_at)) {
-          return false;
-        }
-        return true;
-      } else {
-        // Normal mode: only leads that need re-analysis
-        if (!lead.last_analyzed_at) return true;
-        if (lead.last_message_at && new Date(lead.last_message_at) > new Date(lead.last_analyzed_at)) return true;
+      // Skip own account leads (Simpli.bot, Simpli Immo, Simpli Finance)
+      if (isOwnAccount(lead.ghl_location_id)) return false;
+
+      // Skip leads already analyzed in THIS job (based on job.started_at)
+      if (lead.last_analyzed_at && new Date(lead.last_analyzed_at) >= new Date(job.started_at)) {
         return false;
       }
-    }).slice(0, BATCH_SIZE);
+
+      return true;
+    });
+
+    const remainingLeadsCount = filteredLeads.length;
+    const totalRawLeads = allLeadsRaw?.length || 0;
+    console.log(`Job ${job_id}: ${totalRawLeads} total leads in DB, ${remainingLeadsCount} remaining after filter, force_all=${force_all}`);
+
+    // Take batch for processing
+    let allLeads = filteredLeads.slice(0, BATCH_SIZE);
+    console.log(`Job ${job_id}: Processing batch of ${allLeads.length} leads`);
 
     if (!allLeads || allLeads.length === 0) {
-      // All done!
-      await supabase
-        .from('analysis_jobs')
-        .update({
-          status: 'completed',
-          completed_at: new Date().toISOString()
-        })
-        .eq('id', job_id);
+      // Check if really done or if there's a mismatch
+      const processedSoFar = (job.analyzed_leads || 0) + (job.skipped_no_messages || 0) + (job.failed_leads || 0);
+      const actuallyComplete = processedSoFar >= job.total_leads || remainingLeadsCount === 0;
 
-      return new Response(
-        JSON.stringify({
-          success: true,
-          job_id,
-          status: 'completed',
-          analyzed_leads: job.analyzed_leads,
-          total_leads: job.total_leads
-        }),
-        { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      );
+      if (actuallyComplete) {
+        // All done!
+        await supabase
+          .from('analysis_jobs')
+          .update({
+            status: 'completed',
+            completed_at: new Date().toISOString()
+          })
+          .eq('id', job_id);
+
+        console.log(`Job ${job_id} completed: ${processedSoFar}/${job.total_leads} leads processed`);
+
+        return new Response(
+          JSON.stringify({
+            success: true,
+            job_id,
+            status: 'completed',
+            analyzed_leads: job.analyzed_leads,
+            total_leads: job.total_leads
+          }),
+          { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        );
+      } else {
+        // Something went wrong - leads exist but weren't selected
+        console.error(`Job ${job_id}: Filter returned 0 leads but ${job.total_leads - processedSoFar} leads remain unprocessed!`);
+
+        // Mark job as failed
+        await supabase
+          .from('analysis_jobs')
+          .update({
+            status: 'failed',
+            error_message: `Filter-Fehler: ${job.total_leads - processedSoFar} Leads nicht verarbeitet`,
+            completed_at: new Date().toISOString()
+          })
+          .eq('id', job_id);
+
+        return new Response(
+          JSON.stringify({
+            success: false,
+            job_id,
+            status: 'failed',
+            error: `Filter returned no leads but ${job.total_leads - processedSoFar} leads remain unprocessed`,
+            analyzed_leads: job.analyzed_leads,
+            total_leads: job.total_leads
+          }),
+          { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        );
+      }
     }
 
     // Get messages for these leads
@@ -288,12 +650,13 @@ serve(async (req) => {
           ai_improvement_suggestion: JSON.stringify({
             status: 'no_messages',
             zusammenfassung: 'Noch keine Konversation - Erstkontakt herstellen',
-            simpli_platzierung: 'nicht',
-            lead_interesse: 'kein',
-            termin_status: 'kein',
-            gespraechs_status: 'offen',
-            follow_up: ['Erstkontakt herstellen'],
-            verbesserung: 'Erstkontakt mit Lead aufnehmen'
+            sf_pitch: 'nein',
+            sf_interesse: 'nein',
+            sf_termin: 'nein',
+            besichtigung: 'nein',
+            follow_up_reason: 'Erstkontakt muss hergestellt werden',
+            follow_up_date: null,
+            follow_up_message: null
           })
         })
         .in('id', noMsgIds);
@@ -312,64 +675,98 @@ serve(async (req) => {
           ai_improvement_suggestion: JSON.stringify({
             status: 'no_response',
             zusammenfassung: 'Keine Antwort - Lead hat nicht reagiert',
-            simpli_platzierung: 'nicht',
-            lead_interesse: 'kein',
-            termin_status: 'kein',
-            gespraechs_status: 'offen',
-            follow_up: ['Erneut kontaktieren', 'Alternative Kontaktmethode versuchen'],
-            verbesserung: 'Lead erneut ansprechen oder andere Ansprache wählen'
+            sf_pitch: 'nein',
+            sf_interesse: 'nein',
+            sf_termin: 'nein',
+            besichtigung: 'nein',
+            follow_up_reason: 'Lead hat nicht geantwortet - erneut kontaktieren',
+            follow_up_date: null,
+            follow_up_message: null
           })
         })
         .in('id', noResponseIds);
       noResponseCount = leadsNoResponse.length;
     }
 
-    // Default analysis prompt
-    const defaultPrompt = `Du bist ein Senior Conversation-, Sales- und Funnel-Analyst mit Fokus auf Immobilien, Finanzierungsberatung und KI-gestützte Lead-Qualifizierung.
+    // Get today's date for follow-up calculation
+    const today = new Date();
+    const todayStr = today.toISOString().split('T')[0]; // YYYY-MM-DD format
 
-Der folgende Chat ist ein Gespräch zwischen einem Interessenten (Lead) und der KI des Maklers.
-Ziel der Makler-KI ist es, Simpli Finance (Finanzierungspartner) sinnvoll und glaubwürdig zu platzieren, sodass der Lead Interesse entwickelt und einen Termin buchen möchte.
+    // Default analysis prompt with new categories
+    const defaultPrompt = `Du bist ein Conversation-Analyst für Immobilien und Finanzierungsberatung.
+
+Der Chat ist zwischen einem Interessenten (Lead) und der KI eines Maklers.
+Ziel: Simpli Finance (Finanzierungspartner) platzieren und Termine vermitteln.
+
+HEUTIGES DATUM: {{today}}
 
 KONVERSATION:
 {{conversation}}
 
-Analysiere und bewerte:
+Analysiere folgende Kategorien:
 
-1. SIMPLI_PLATZIERUNG - Wurde Simpli Finance sinnvoll platziert?
-   - erfolg: Erfolgreich und natürlich platziert, Mehrwert klar
-   - teilweise: Erwähnt aber verbesserungsfähig (Timing, Erklärung)
-   - nicht: Nicht erwähnt oder unpassend platziert
+1. SF_PITCH - Wurde Simpli Finance im Gespräch erwähnt/vorgestellt?
+   - ja: SF wurde klar vorgestellt mit Mehrwert
+   - teilweise: SF erwähnt aber nicht gut erklärt
+   - nein: SF wurde nicht erwähnt
 
-2. LEAD_INTERESSE - Hat der Lead Interesse an Simpli Finance/Finanzierung gezeigt?
-   - klar: Klares Interesse, Nachfragen, positive Reaktionen
-   - unsicher: Latentes/unklares Interesse, Finanzierung relevant
-   - kein: Kein erkennbares Interesse
+2. SF_INTERESSE - Zeigt der Lead Interesse an Finanzierungsberatung durch Simpli Finance?
+   - ja: Klares Interesse, Nachfragen zur Finanzierung
+   - vielleicht: Unklares/latentes Interesse
+   - nein: Kein Interesse an Finanzierungshilfe
 
-3. TERMIN_STATUS - Stand bezüglich Terminen:
-   - gebucht: Termin mit Simpli Finance ODER Makler gebucht/bestätigt
-   - interesse: Interesse an Termin gezeigt, aber nicht gebucht
-   - kein: Kein Termininteresse erkennbar
+3. SF_TERMIN - Status bezüglich Termin mit Simpli Finance Berater:
+   - gebucht: Beratungstermin mit SF ist vereinbart
+   - interesse: Lead zeigt Interesse an SF-Termin
+   - nein: Kein SF-Termin-Interesse
 
-4. GESPRAECHS_STATUS - Qualifizierungsstatus:
-   - qualifiziert: Erfolgreich qualifiziert & übergeben
-   - offen: Interesse vorhanden, Abschluss noch offen
-   - abgebrochen: Früh abgebrochen, kein Interesse, nicht qualifiziert
+4. BESICHTIGUNG - Status bezüglich Besichtigungstermin:
+   - gebucht: Besichtigung ist vereinbart
+   - interesse: Lead will besichtigen
+   - nein: Keine Besichtigung geplant
 
-5. FOLLOW_UP - Maximal 3 konkrete Follow-up Punkte (was nachgefasst werden sollte)
+5. MAKLER_TERMIN - Hat der Lead einen Termin beim Makler (Besichtigung ODER Telefontermin)?
+   - gebucht: Termin ist vereinbart (Besichtigung, Telefonat, oder anderer Termin)
+   - makler_meldet_sich: Makler soll sich melden um Termin zu vereinbaren
+   - interesse: Lead zeigt Interesse an einem Termin
+   - nein: Kein Termin vereinbart oder geplant
 
-6. VERBESSERUNG - Ein konkreter Satz was die KI besser machen könnte
+6. ZUSAMMENFASSUNG - 1-2 Sätze: Was ist passiert? Was ist der aktuelle Stand?
 
-7. ZUSAMMENFASSUNG - Ein Satz der den aktuellen Stand beschreibt
+7. FOLLOW_UP_REASON - Warum braucht dieser Lead ein Follow-up? Oder warum nicht?
+   Falls kein Follow-up nötig (z.B. Termin bereits gebucht, kein Interesse): Erkläre warum.
 
-Antworte NUR mit JSON (keine Markdown-Blöcke):
+8. FOLLOW_UP_DATE - Datum für Follow-up (YYYY-MM-DD) oder null wenn keins nötig.
+   Regeln: Nicht am Wochenende. Dringend = 1-2 Tage, Normal = 3-5 Tage.
+
+9. FOLLOW_UP_MESSAGE - WhatsApp-Nachricht für Follow-up (oder null wenn keins nötig):
+
+   ANREDE: Analysiere ausgehende Nachrichten - wenn "Sie" verwendet wurde → siezen, wenn "du" → duzen.
+
+   STIL:
+   - Menschlich, warm, authentisch
+   - 2-3 kurze Sätze
+   - Bezug auf das Gespräch (Objekt, Situation)
+   - KEINE Floskeln ("Ich hoffe es geht Ihnen gut")
+   - Echten Mehrwert liefern
+
+   SIMPLI FINANCE INFOS (nutze passend):
+   - Netzwerk aus Top-Finanzierungsexperten
+   - Kostenlos für Käufer, unabhängig
+   - 24h-Finanzierungscheck für Klarheit
+   - Käufer wissen VOR Besichtigung was sie sich leisten können
+
+Antworte NUR mit JSON:
 {
-  "simpli_platzierung": "erfolg|teilweise|nicht",
-  "lead_interesse": "klar|unsicher|kein",
-  "termin_status": "gebucht|interesse|kein",
-  "gespraechs_status": "qualifiziert|offen|abgebrochen",
-  "follow_up": ["Punkt 1", "Punkt 2"],
-  "verbesserung": "Konkreter Verbesserungsvorschlag",
-  "zusammenfassung": "Kurze Zusammenfassung"
+  "sf_pitch": "ja|teilweise|nein",
+  "sf_interesse": "ja|vielleicht|nein",
+  "sf_termin": "gebucht|interesse|nein",
+  "besichtigung": "gebucht|interesse|nein",
+  "makler_termin": "gebucht|makler_meldet_sich|interesse|nein",
+  "zusammenfassung": "Kurze Zusammenfassung",
+  "follow_up_reason": "Warum Follow-up nötig/nicht nötig",
+  "follow_up_date": "YYYY-MM-DD oder null",
+  "follow_up_message": "Nachricht oder null"
 }`;
 
     // Use custom prompt if provided, otherwise default
@@ -400,7 +797,9 @@ Antworte NUR mit JSON (keine Markdown-Blöcke):
 
       try {
         // Analyze with Gemini 2.0 Flash - detailed analysis
-        const promptWithConversation = analysisPrompt.replace('{{conversation}}', conversationText);
+        const promptWithConversation = analysisPrompt
+          .replace('{{today}}', todayStr)
+          .replace('{{conversation}}', conversationText);
 
         const analysisResponse = await fetch(
           `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${geminiKey}`,
@@ -444,11 +843,10 @@ Antworte NUR mit JSON (keine Markdown-Blöcke):
         const analysis = JSON.parse(jsonMatch[0]);
 
         // Map analysis to database fields
-        const conversationStatus = analysis.gespraechs_status === 'qualifiziert'
+        // SF Termin gebucht = abgeschlossen, sonst läuft noch
+        const conversationStatus = analysis.sf_termin === 'gebucht'
           ? 'abgeschlossen'
-          : analysis.gespraechs_status === 'abgebrochen'
-            ? 'unterhaltung_abgebrochen'
-            : 'unterhaltung_laeuft';
+          : 'unterhaltung_laeuft';
 
         return {
           leadId: lead.id,
@@ -456,9 +854,9 @@ Antworte NUR mit JSON (keine Markdown-Blöcke):
           data: {
             last_analyzed_at: now,
             conversation_status: conversationStatus,
-            has_makler_termin: analysis.termin_status === 'gebucht',
-            simpli_platziert: analysis.simpli_platzierung !== 'nicht',
-            simpli_interessiert: analysis.lead_interesse !== 'kein',
+            has_makler_termin: analysis.makler_termin === 'gebucht' || analysis.makler_termin === 'makler_meldet_sich',
+            simpli_platziert: analysis.sf_pitch !== 'nein',
+            simpli_interessiert: analysis.sf_interesse !== 'nein',
             ai_quality_score: calculateQualityScore(analysis),
             ai_improvement_suggestion: JSON.stringify(analysis)
           }
@@ -474,23 +872,23 @@ Antworte NUR mit JSON (keine Markdown-Blöcke):
     function calculateQualityScore(analysis: any): number {
       let score = 5; // Base score
 
-      // Simpli Platzierung
-      if (analysis.simpli_platzierung === 'erfolg') score += 2;
-      else if (analysis.simpli_platzierung === 'teilweise') score += 1;
+      // SF Pitch
+      if (analysis.sf_pitch === 'ja') score += 2;
+      else if (analysis.sf_pitch === 'teilweise') score += 1;
       else score -= 1;
 
-      // Lead Interesse
-      if (analysis.lead_interesse === 'klar') score += 2;
-      else if (analysis.lead_interesse === 'unsicher') score += 1;
+      // SF Interesse
+      if (analysis.sf_interesse === 'ja') score += 2;
+      else if (analysis.sf_interesse === 'vielleicht') score += 1;
       else score -= 1;
 
-      // Termin Status
-      if (analysis.termin_status === 'gebucht') score += 2;
-      else if (analysis.termin_status === 'interesse') score += 1;
+      // SF Termin (wichtigster Faktor)
+      if (analysis.sf_termin === 'gebucht') score += 3;
+      else if (analysis.sf_termin === 'interesse') score += 1;
 
-      // Gesprächs Status
-      if (analysis.gespraechs_status === 'qualifiziert') score += 1;
-      else if (analysis.gespraechs_status === 'abgebrochen') score -= 2;
+      // Besichtigung
+      if (analysis.besichtigung === 'gebucht') score += 2;
+      else if (analysis.besichtigung === 'interesse') score += 1;
 
       return Math.max(1, Math.min(10, score));
     }
