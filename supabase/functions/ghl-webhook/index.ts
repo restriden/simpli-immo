@@ -70,6 +70,8 @@ serve(async (req: Request) => {
     switch (type) {
       case "InboundMessage":
       case "OutboundMessage":
+      case "MessageStatusUpdate":
+      case "ConversationUnreadUpdate":
         await handleMessage(supabase, connection, payload);
         break;
 
@@ -132,25 +134,73 @@ async function handleMessage(supabase: any, connection: any, payload: any) {
                     payload.type === "InboundMessage" ||
                     payload.direction === "incoming";
 
+  // === DELIVERY STATUS TRACKING ===
+  // Extract status from GHL payload
+  const ghlStatus = payload.status || payload.messageStatus || payload.deliveryStatus || "";
+  const ghlError = payload.error || payload.errorMessage || payload.failureReason ||
+                   payload.meta?.error || payload.message?.error || "";
+
+  // Map GHL status to our delivery_status
+  let deliveryStatus = "pending";
+  let errorMessage = null;
+
+  if (ghlStatus) {
+    const statusLower = ghlStatus.toLowerCase();
+    // "completed" = message was successfully sent/delivered in GHL
+    if (statusLower === "delivered" || statusLower === "read" || statusLower === "sent" || statusLower === "completed") {
+      deliveryStatus = statusLower === "read" ? "read" : "delivered";
+    } else if (statusLower === "failed" || statusLower === "undelivered" || statusLower === "error") {
+      deliveryStatus = "failed";
+      errorMessage = ghlError || "Nachricht konnte nicht zugestellt werden";
+
+      // Check for 24h window error
+      if (ghlError.toLowerCase().includes("24") ||
+          ghlError.toLowerCase().includes("window") ||
+          ghlError.toLowerCase().includes("session") ||
+          ghlError.toLowerCase().includes("template")) {
+        errorMessage = "WhatsApp 24-Stunden-Fenster geschlossen. Der Kontakt muss zuerst antworten.";
+      }
+    } else if (statusLower === "pending" || statusLower === "queued" || statusLower === "sending") {
+      deliveryStatus = "pending";
+    }
+  } else if (!isInbound) {
+    // Outbound without status = assume sent
+    deliveryStatus = "sent";
+  } else {
+    // Inbound messages are always delivered
+    deliveryStatus = "delivered";
+  }
+
   console.log("Extracted - contactId:", contactId, "messageBody:", messageBody?.substring(0, 50));
+  console.log("Delivery status:", deliveryStatus, "Error:", errorMessage);
 
   if (!contactId) {
     console.error("Missing contactId in payload. Available keys:", Object.keys(payload));
     return;
   }
 
-  if (!messageBody) {
-    console.error("Missing message body in payload");
+  // Allow status updates for messages without body (pure status webhook)
+  if (!messageBody && !ghlStatus) {
+    console.error("Missing message body and status in payload");
     return;
   }
 
   // Find the lead for this contact
-  const { data: lead, error: leadError } = await supabase
+  // Use ghl_location_id instead of user_id to support SimpliOS mode (where user_id is NULL)
+  let leadQuery = supabase
     .from("leads")
     .select("id")
-    .eq("ghl_contact_id", contactId)
-    .eq("user_id", connection.user_id)
-    .single();
+    .eq("ghl_contact_id", contactId);
+
+  // In SimpliOS mode, user_id is NULL - use location_id instead
+  if (connection.user_id) {
+    leadQuery = leadQuery.eq("user_id", connection.user_id);
+  } else {
+    // SimpliOS mode: find by location
+    leadQuery = leadQuery.eq("ghl_location_id", payload.locationId);
+  }
+
+  const { data: lead, error: leadError } = await leadQuery.single();
 
   if (leadError || !lead) {
     console.log("Lead not found for contact:", contactId, "Error:", leadError?.message);
@@ -161,7 +211,7 @@ async function handleMessage(supabase: any, connection: any, payload: any) {
   console.log("Found lead:", lead.id);
 
   // Create message record
-  const messageData = {
+  const messageData: any = {
     user_id: connection.user_id,
     lead_id: lead.id,
     ghl_message_id: messageId,
@@ -171,22 +221,48 @@ async function handleMessage(supabase: any, connection: any, payload: any) {
     is_template: false,
     ghl_data: payload,
     created_at: payload.dateAdded || payload.createdAt || payload.timestamp || new Date().toISOString(),
+    delivery_status: deliveryStatus,
+    error_message: errorMessage,
+    updated_at: new Date().toISOString(),
   };
 
-  console.log("Inserting message:", messageData.ghl_message_id);
+  console.log("Processing message:", messageData.ghl_message_id, "Status:", deliveryStatus);
 
   // Check if message already exists
   const { data: existing } = await supabase
     .from("messages")
-    .select("id")
+    .select("id, delivery_status")
     .eq("ghl_message_id", messageData.ghl_message_id)
     .single();
 
   if (existing) {
-    console.log("Message already exists, skipping");
+    // Message exists - update delivery status if changed
+    console.log("Message exists, updating status from", existing.delivery_status, "to", deliveryStatus);
+
+    const updateData: any = {
+      delivery_status: deliveryStatus,
+      updated_at: new Date().toISOString(),
+      ghl_data: payload, // Update with latest payload
+    };
+
+    if (errorMessage) {
+      updateData.error_message = errorMessage;
+    }
+
+    const { error: updateError } = await supabase
+      .from("messages")
+      .update(updateData)
+      .eq("id", existing.id);
+
+    if (updateError) {
+      console.error("Error updating message status:", updateError);
+    } else {
+      console.log("Message status updated to:", deliveryStatus);
+    }
     return;
   }
 
+  // New message - insert
   const { error: insertError } = await supabase.from("messages").insert(messageData);
 
   if (insertError) {
@@ -194,7 +270,7 @@ async function handleMessage(supabase: any, connection: any, payload: any) {
     return;
   }
 
-  console.log("Message inserted successfully");
+  console.log("Message inserted successfully with status:", deliveryStatus);
 
   // Update lead's last_message_at
   await supabase
@@ -204,6 +280,33 @@ async function handleMessage(supabase: any, connection: any, payload: any) {
       updated_at: new Date().toISOString(),
     })
     .eq("id", lead.id);
+
+  console.log("Updated lead last_message_at to:", messageData.created_at);
+
+  // === TRIGGER LEAD ANALYSIS IN BACKGROUND ===
+  // This updates the lead status, follow-up date, and all analysis fields
+  try {
+    const analyzeUrl = `${Deno.env.get("SUPABASE_URL")}/functions/v1/sync-analyze-leads`;
+    fetch(analyzeUrl, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")}`,
+      },
+      body: JSON.stringify({
+        lead_id: lead.id,
+      }),
+    }).then(async (res) => {
+      if (res.ok) {
+        const result = await res.json();
+        console.log("Lead analysis triggered:", result.success ? "success" : "skipped", result.quality_score || "");
+      } else {
+        console.error("Lead analysis failed:", await res.text());
+      }
+    }).catch(err => console.error("Lead analysis error:", err));
+  } catch (analyzeError) {
+    console.error("Error triggering lead analysis:", analyzeError);
+  }
 
   // Process messages with AI
   if (isInbound) {
@@ -466,15 +569,22 @@ async function handleTask(supabase: any, connection: any, payload: any) {
   }
 
   // Find lead if contact is associated
+  // Use ghl_location_id for SimpliOS mode (where user_id is NULL)
   let leadId = null;
   const contactId = task.contactId || task.contact_id || payload.contactId;
   if (contactId) {
-    const { data: lead } = await supabase
+    let taskLeadQuery = supabase
       .from("leads")
       .select("id")
-      .eq("ghl_contact_id", contactId)
-      .eq("user_id", connection.user_id)
-      .single();
+      .eq("ghl_contact_id", contactId);
+
+    if (connection.user_id) {
+      taskLeadQuery = taskLeadQuery.eq("user_id", connection.user_id);
+    } else {
+      taskLeadQuery = taskLeadQuery.eq("ghl_location_id", payload.locationId);
+    }
+
+    const { data: lead } = await taskLeadQuery.single();
     leadId = lead?.id;
   }
 
