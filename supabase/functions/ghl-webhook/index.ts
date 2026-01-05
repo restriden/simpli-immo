@@ -283,6 +283,24 @@ async function handleMessage(supabase: any, connection: any, payload: any) {
 
   console.log("Updated lead last_message_at to:", messageData.created_at);
 
+  // === DELETE PENDING FOLLOW-UP APPROVALS ON NEW INCOMING MESSAGE ===
+  // When a lead responds, any pending follow-up is no longer relevant
+  if (isInbound) {
+    const { data: deletedApprovals, error: deleteError } = await supabase
+      .from("followup_approvals")
+      .delete()
+      .eq("lead_id", lead.id)
+      .eq("status", "pending")
+      .select("id");
+
+    if (deletedApprovals && deletedApprovals.length > 0) {
+      console.log(`[Webhook] Deleted ${deletedApprovals.length} pending follow-up approvals for lead ${lead.id} - new incoming message received`);
+    }
+    if (deleteError) {
+      console.error("Error deleting pending follow-ups:", deleteError);
+    }
+  }
+
   // === TRIGGER LEAD ANALYSIS IN BACKGROUND ===
   // This updates the lead status, follow-up date, and all analysis fields
   try {
@@ -306,6 +324,36 @@ async function handleMessage(supabase: any, connection: any, payload: any) {
     }).catch(err => console.error("Lead analysis error:", err));
   } catch (analyzeError) {
     console.error("Error triggering lead analysis:", analyzeError);
+  }
+
+  // === TRIGGER FOLLOW-UP RE-GENERATION IN BACKGROUND ===
+  // This generates a new follow-up suggestion based on the updated conversation
+  // The generate-followup function will check if a follow-up is needed
+  try {
+    const followupUrl = `${Deno.env.get("SUPABASE_URL")}/functions/v1/generate-followup`;
+    fetch(followupUrl, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")}`,
+      },
+      body: JSON.stringify({
+        lead_id: lead.id,
+      }),
+    }).then(async (res) => {
+      if (res.ok) {
+        const result = await res.json();
+        if (result.no_follow_up) {
+          console.log("Follow-up not needed:", result.no_follow_up_reason);
+        } else if (result.success) {
+          console.log("Follow-up generated, FU#:", result.follow_up_number);
+        }
+      } else {
+        console.error("Follow-up generation failed:", await res.text());
+      }
+    }).catch(err => console.error("Follow-up generation error:", err));
+  } catch (followupError) {
+    console.error("Error triggering follow-up generation:", followupError);
   }
 
   // Process messages with AI
@@ -482,15 +530,32 @@ async function handleContact(supabase: any, connection: any, payload: any) {
   }
 }
 
+// Simpli Finance Location ID - used for Eva KPI tracking
+const SIMPLI_FINANCE_LOCATION_ID = "iDLo7b4WOOCkE9voshIM";
+
+function normalizePhone(phone: string | null | undefined): string | null {
+  if (!phone) return null;
+  const digits = phone.replace(/\D/g, "");
+  return digits.length >= 10 ? digits.slice(-10) : digits;
+}
+
+function normalizeEmail(email: string | null | undefined): string | null {
+  if (!email) return null;
+  return email.toLowerCase().trim();
+}
+
 async function handleAppointment(supabase: any, connection: any, payload: any) {
   console.log("=== HANDLING APPOINTMENT ===");
 
   const event = payload.appointment || payload;
+  const locationId = payload.locationId;
 
   if (!event.id) {
     console.error("No event ID in payload");
     return;
   }
+
+  console.log("Appointment location:", locationId, "SF location:", SIMPLI_FINANCE_LOCATION_ID);
 
   // Find lead if contact is associated
   let leadId = null;
@@ -537,6 +602,101 @@ async function handleAppointment(supabase: any, connection: any, payload: any) {
 
     if (error) {
       console.error("Error creating todo:", error);
+    }
+  }
+
+  // === EVA KPI TRACKING ===
+  // If this appointment is from Simpli Finance, track it for the Eva KPI board
+  if (locationId === SIMPLI_FINANCE_LOCATION_ID && event.contactId) {
+    console.log("SF Appointment detected - tracking for Eva KPI");
+
+    try {
+      // Fetch contact details from SF GHL to get email/phone
+      const sfConnection = await supabase
+        .from("ghl_connections")
+        .select("access_token")
+        .eq("location_id", SIMPLI_FINANCE_LOCATION_ID)
+        .eq("is_active", true)
+        .single();
+
+      if (sfConnection.data?.access_token) {
+        const contactUrl = `https://services.leadconnectorhq.com/contacts/${event.contactId}`;
+        const contactRes = await fetch(contactUrl, {
+          headers: {
+            "Authorization": `Bearer ${sfConnection.data.access_token}`,
+            "Version": "2021-07-28",
+          }
+        });
+
+        if (contactRes.ok) {
+          const contactData = await contactRes.json();
+          const contact = contactData.contact || contactData;
+          console.log("SF Contact:", contact.email, contact.phone);
+
+          const email = normalizeEmail(contact.email);
+          const phone = normalizePhone(contact.phone);
+
+          // Find matching Makler lead by email or phone
+          let matchedLead = null;
+
+          if (email) {
+            const { data: leadByEmail } = await supabase
+              .from("leads")
+              .select("id, sf_reached_beratung")
+              .ilike("email", email)
+              .neq("ghl_location_id", SIMPLI_FINANCE_LOCATION_ID)
+              .or("is_archived.is.null,is_archived.eq.false")
+              .single();
+            matchedLead = leadByEmail;
+          }
+
+          if (!matchedLead && phone) {
+            // Try phone match - need to match last 10 digits
+            const { data: leads } = await supabase
+              .from("leads")
+              .select("id, phone, sf_reached_beratung")
+              .not("phone", "is", null)
+              .neq("ghl_location_id", SIMPLI_FINANCE_LOCATION_ID)
+              .or("is_archived.is.null,is_archived.eq.false");
+
+            if (leads) {
+              for (const lead of leads) {
+                if (normalizePhone(lead.phone) === phone) {
+                  matchedLead = lead;
+                  break;
+                }
+              }
+            }
+          }
+
+          if (matchedLead) {
+            console.log("Matched lead for Eva KPI:", matchedLead.id);
+
+            // Set sf_reached_beratung = true for Eva KPI tracking
+            const { error: updateError } = await supabase
+              .from("leads")
+              .update({
+                sf_reached_beratung: true,
+                sf_pipeline_stage: "beratung_gebucht",
+                sf_pipeline_updated_at: new Date().toISOString(),
+                sf_contact_id: event.contactId,
+              })
+              .eq("id", matchedLead.id);
+
+            if (updateError) {
+              console.error("Error updating lead for Eva KPI:", updateError);
+            } else {
+              console.log("Lead updated for Eva KPI - sf_reached_beratung = true");
+            }
+          } else {
+            console.log("No matching Makler lead found for SF contact:", email, phone);
+          }
+        } else {
+          console.error("Failed to fetch SF contact:", await contactRes.text());
+        }
+      }
+    } catch (err) {
+      console.error("Error in Eva KPI tracking:", err);
     }
   }
 }
