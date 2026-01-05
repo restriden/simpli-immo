@@ -347,9 +347,23 @@ Generiere jetzt Follow-Up #${nextFollowUpNumber}.
       );
     }
 
-    // 11. Format message based on 24h window (TEMPLATE MODE)
+    // 11. Calculate if template is needed based on SEND DATE (not current time)
+    // This ensures the template format is correct for when the message actually goes out
+    let willNeedTemplate = !isWithin24h; // Default: current 24h window status
+
+    if (followUpDate && lastIncomingMessage) {
+      // Calculate if 24h window will be closed on the send date
+      const lastIncomingTime = new Date(lastIncomingMessage.created_at).getTime();
+      const windowClosesAt = lastIncomingTime + (24 * 60 * 60 * 1000); // +24h
+      const sendDateTime = new Date(followUpDate).getTime() + (9 * 60 * 60 * 1000); // Assume 9:00 AM send time
+
+      willNeedTemplate = sendDateTime > windowClosesAt;
+      console.log(`[GenerateFollowup] Send date: ${followUpDate}, Window closes: ${new Date(windowClosesAt).toISOString()}, Will need template: ${willNeedTemplate}`);
+    }
+
+    // 12. Format message based on template requirement
     let formattedMessage = followupMessage;
-    if (!isWithin24h) {
+    if (willNeedTemplate) {
       // Aggressively strip any greetings/closings the AI might have added
       formattedMessage = followupMessage
         // Remove greetings at start
@@ -393,7 +407,7 @@ Generiere jetzt Follow-Up #${nextFollowUpNumber}.
         conversation_summary: conversationSummary,
         last_messages: messages.slice(-10),
         follow_up_reason: followupReason,
-        is_template_required: !isWithin24h,
+        is_template_required: willNeedTemplate,
         status: 'pending',
         suggested_follow_up_date: followUpDate,
         suggested_date_reason: dateReason,
