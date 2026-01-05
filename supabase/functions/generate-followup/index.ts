@@ -19,6 +19,13 @@ const corsHeaders = {
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 
+// Own account location IDs - NO follow-ups for these (only for Makler locations)
+const EXCLUDED_LOCATION_IDS = [
+  "iDLo7b4WOOCkE9voshIM", // Simpli Finance GmbH
+  "dI8ofFbKIogmLSUTvTFn", // simpli.immo
+  "MAMK21fjL4Z52qgcvpgq", // simpli.bot
+];
+
 interface GenerateFollowupRequest {
   lead_id: string;
   gemini_api_key?: string;
@@ -84,6 +91,20 @@ serve(async (req) => {
       return new Response(
         JSON.stringify({ error: "Lead not found", details: leadError?.message }),
         { status: 404, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
+    // 1b. Check if lead is from excluded location (Simpli Immo, Simpli Finance, Simpli Bot)
+    // Only generate follow-ups for Makler locations
+    if (lead.ghl_location_id && EXCLUDED_LOCATION_IDS.includes(lead.ghl_location_id)) {
+      console.log(`[GenerateFollowup] Lead ${lead_id} is from excluded location (${lead.ghl_location_id}), skipping`);
+      return new Response(
+        JSON.stringify({
+          success: true,
+          no_follow_up: true,
+          no_follow_up_reason: "Kein Follow-up für eigene Accounts (nur Makler-Leads)"
+        }),
+        { headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
 
