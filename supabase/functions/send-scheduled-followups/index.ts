@@ -28,12 +28,13 @@ serve(async (req) => {
         *,
         leads!inner (
           id,
+          name,
           ghl_contact_id,
           ghl_location_id,
           email,
-          first_name,
-          last_name,
-          last_message_at
+          last_message_at,
+          followup_1_sent_at,
+          followup_2_sent_at
         )
       `)
       .eq("status", "approved")
@@ -122,18 +123,43 @@ serve(async (req) => {
           accessToken = refreshResult.accessToken;
         }
 
-        // 5. Calculate if template is needed based on NOW (not approval time)
-        const message = followup.final_message || followup.suggested_message;
-        const needsTemplate = checkIfTemplateNeeded(lead);
+        // 5. Get form_type (du/Sie) for this location
+        const { data: whitelist } = await supabase
+          .from("ghl_whitelist_subaccounts")
+          .select("form_type")
+          .eq("location_id", lead.ghl_location_id)
+          .single();
 
-        // 6. Send the message via GHL API
-        const sendResult = await sendGhlMessage(
-          accessToken,
-          lead.ghl_location_id,
-          lead.ghl_contact_id,
-          message,
-          needsTemplate
-        );
+        const formType = whitelist?.form_type || 'sie';
+
+        // 6. Calculate if template is needed based on last INCOMING message (24h window)
+        const rawMessage = followup.final_message || followup.suggested_message;
+        const needsTemplate = await checkIfTemplateNeeded(lead.id, supabase);
+
+        // 7. Format message with proper salutation
+        const message = formatMessageWithSalutation(rawMessage, lead, formType, needsTemplate);
+
+        // 8. Send the message - use different method based on template need
+        let sendResult;
+
+        if (needsTemplate) {
+          // Template needed: Update simplios_message field, GHL workflow will send template
+          console.log(`[SendScheduledFollowups] Template needed, updating simplios_message field...`);
+          sendResult = await updateContactFieldForTemplate(
+            lead.ghl_location_id,
+            lead.id,  // Use lead.id (our DB ID), not ghl_contact_id
+            message
+          );
+        } else {
+          // Within 24h window: Send directly via conversations API
+          console.log(`[SendScheduledFollowups] Within 24h window, sending directly...`);
+          sendResult = await sendGhlMessage(
+            accessToken,
+            lead.ghl_location_id,
+            lead.ghl_contact_id,
+            message
+          );
+        }
 
         if (!sendResult.success) {
           console.log(`[SendScheduledFollowups] Failed to send ${followup.id}: ${sendResult.error}`);
@@ -142,23 +168,95 @@ serve(async (req) => {
         }
 
         // 7. Mark as sent
-        await supabase
+        const sentAt = new Date().toISOString();
+        const { error: updateError } = await supabase
           .from("followup_approvals")
           .update({
             status: "sent",
-            sent_at: new Date().toISOString(),
-            updated_at: new Date().toISOString()
+            sent_at: sentAt,
+            updated_at: sentAt
           })
           .eq("id", followup.id);
 
+        if (updateError) {
+          console.error(`[SendScheduledFollowups] Error updating approval status: ${updateError.message}`);
+        } else {
+          console.log(`[SendScheduledFollowups] Updated approval ${followup.id} to sent`);
+        }
+
         // 8. Store the message in our messages table
-        await supabase.from("messages").insert({
+        const { error: msgError } = await supabase.from("messages").insert({
           lead_id: lead.id,
           ghl_message_id: sendResult.messageId,
-          content: message,
+          content: needsTemplate ? `[Template] ${message}` : message,
           type: "outgoing",
-          created_at: new Date().toISOString()
+          is_template: needsTemplate,
+          delivery_status: needsTemplate ? "pending" : "sent",
+          created_at: sentAt
         });
+
+        if (msgError) {
+          console.error(`[SendScheduledFollowups] Error inserting message: ${msgError.message}`);
+        }
+
+        // 9. Update leads table with followup sent timestamp
+        const followUpNumber = followup.follow_up_number || 1;
+        const leadUpdate: any = {};
+        if (followUpNumber === 1 && !lead.followup_1_sent_at) {
+          leadUpdate.followup_1_sent_at = sentAt;
+          leadUpdate.followup_1_approved_id = followup.id;
+        } else if (followUpNumber === 2 && !lead.followup_2_sent_at) {
+          leadUpdate.followup_2_sent_at = sentAt;
+          leadUpdate.followup_2_approved_id = followup.id;
+        } else if (!lead.followup_1_sent_at) {
+          // Fallback: if no followup_1 yet, use that
+          leadUpdate.followup_1_sent_at = sentAt;
+          leadUpdate.followup_1_approved_id = followup.id;
+        }
+
+        if (Object.keys(leadUpdate).length > 0) {
+          await supabase
+            .from("leads")
+            .update(leadUpdate)
+            .eq("id", lead.id);
+          console.log(`[SendScheduledFollowups] Updated lead ${lead.id} with followup_${followUpNumber}_sent_at`);
+        }
+
+        // 10. Update followup_prompt_performance for tracking
+        if (followup.prompt_version_id) {
+          const periodDate = today;
+
+          // Try to get existing performance record for today
+          const { data: existingPerf } = await supabase
+            .from("followup_prompt_performance")
+            .select("id, total_sent")
+            .eq("prompt_version_id", followup.prompt_version_id)
+            .eq("period_date", periodDate)
+            .single();
+
+          if (existingPerf) {
+            // Update existing record
+            await supabase
+              .from("followup_prompt_performance")
+              .update({
+                total_sent: (existingPerf.total_sent || 0) + 1,
+                updated_at: sentAt
+              })
+              .eq("id", existingPerf.id);
+          } else {
+            // Create new record for today
+            await supabase
+              .from("followup_prompt_performance")
+              .insert({
+                prompt_version_id: followup.prompt_version_id,
+                period_date: periodDate,
+                total_sent: 1,
+                total_approved: 0,
+                total_rejected: 0
+              });
+          }
+          console.log(`[SendScheduledFollowups] Updated performance tracking for prompt ${followup.prompt_version_id}`);
+        }
 
         console.log(`[SendScheduledFollowups] ✓ Sent follow-up ${followup.id} to ${lead.email || lead.ghl_contact_id}`);
         sentCount++;
@@ -194,14 +292,87 @@ serve(async (req) => {
 });
 
 // Check if template message is needed (24h window closed)
-function checkIfTemplateNeeded(lead: any): boolean {
-  if (!lead.last_message_at) return true; // No messages = need template
+// IMPORTANT: The 24h window is based on the last INCOMING message from the customer,
+// NOT the last message overall (which could be outgoing from us)
+async function checkIfTemplateNeeded(leadId: string, supabase: any): Promise<boolean> {
+  // Get the last incoming message for this lead
+  const { data: lastIncoming, error } = await supabase
+    .from("messages")
+    .select("created_at")
+    .eq("lead_id", leadId)
+    .eq("type", "incoming")
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .single();
 
-  const lastMessageTime = new Date(lead.last_message_at).getTime();
+  if (error || !lastIncoming) {
+    console.log(`[SendScheduledFollowups] No incoming messages found for lead ${leadId} - template needed`);
+    return true; // No incoming messages = need template
+  }
+
+  const lastIncomingTime = new Date(lastIncoming.created_at).getTime();
   const now = Date.now();
-  const hoursSinceLastMessage = (now - lastMessageTime) / (1000 * 60 * 60);
+  const hoursSinceLastIncoming = (now - lastIncomingTime) / (1000 * 60 * 60);
 
-  return hoursSinceLastMessage > 24;
+  console.log(`[SendScheduledFollowups] Last incoming message: ${lastIncoming.created_at}, hours ago: ${hoursSinceLastIncoming.toFixed(1)}`);
+
+  return hoursSinceLastIncoming > 24;
+}
+
+// Format message based on whether template is needed
+// TEMPLATE RULES (via Custom Field / GHL Workflow):
+// 1. NO "Hallo" at the beginning
+// 2. NO farewell/closing at the end
+// 3. NO line breaks/paragraphs (causes WhatsApp rejection)
+//
+// DIRECT MESSAGE (within 24h window):
+// - Can have greeting and closing
+function formatMessageWithSalutation(
+  message: string,
+  lead: any,
+  formType: string,
+  needsTemplate: boolean
+): string {
+  const trimmedMessage = message.trim();
+
+  if (needsTemplate) {
+    // TEMPLATE: Clean message - no greeting, no closing, no line breaks
+    let cleanMessage = trimmedMessage;
+
+    // Remove "Hallo " or similar greetings at the start
+    cleanMessage = cleanMessage.replace(/^(hallo|hi|hey|guten\s*tag|liebe[rs]?|moin)\s*/i, '');
+
+    // Remove closing phrases at the end
+    cleanMessage = cleanMessage.replace(/\s*(viele\s*)?grüße!?\s*$/i, '');
+    cleanMessage = cleanMessage.replace(/\s*liebe\s*grüße!?\s*$/i, '');
+    cleanMessage = cleanMessage.replace(/\s*mit\s*freundlichen\s*grüßen!?\s*$/i, '');
+    cleanMessage = cleanMessage.replace(/\s*mfg!?\s*$/i, '');
+
+    // Remove all line breaks (replace with space)
+    cleanMessage = cleanMessage.replace(/[\r\n]+/g, ' ');
+
+    // Clean up multiple spaces
+    cleanMessage = cleanMessage.replace(/\s+/g, ' ').trim();
+
+    console.log(`[SendScheduledFollowups] Template message formatted: "${cleanMessage}"`);
+    return cleanMessage;
+  }
+
+  // DIRECT MESSAGE (within 24h window): Add greeting and closing
+  const greeting = 'Hallo ';
+  const closing = '\n\nViele Grüße!';
+
+  // Check if message already has greeting
+  const hasGreeting = /^(hallo|hi|hey|guten|liebe|moin)/i.test(trimmedMessage);
+  if (hasGreeting) {
+    // Already has greeting, just ensure closing
+    if (!/grüße|gruesse/i.test(trimmedMessage)) {
+      return trimmedMessage + closing;
+    }
+    return trimmedMessage;
+  }
+
+  return greeting + trimmedMessage + closing;
 }
 
 // Refresh GHL OAuth token
@@ -249,28 +420,21 @@ async function refreshGhlToken(
   }
 }
 
-// Send message via GHL API
+// Send message directly via GHL API (within 24h window)
 async function sendGhlMessage(
   accessToken: string,
   locationId: string,
   contactId: string,
-  message: string,
-  useTemplate: boolean
+  message: string
 ): Promise<{ success: boolean; messageId?: string; error?: string }> {
   try {
     const endpoint = `https://services.leadconnectorhq.com/conversations/messages`;
 
     const body: any = {
-      type: "SMS",
+      type: "WhatsApp",
       contactId: contactId,
       message: message,
     };
-
-    // If template needed, format as WhatsApp template
-    if (useTemplate) {
-      body.type = "WhatsApp";
-      // Note: Template formatting may need adjustment based on GHL API requirements
-    }
 
     const response = await fetch(endpoint, {
       method: "POST",
@@ -289,6 +453,58 @@ async function sendGhlMessage(
 
     const result = await response.json();
     return { success: true, messageId: result.messageId || result.id };
+  } catch (err: any) {
+    return { success: false, error: err.message };
+  }
+}
+
+// Update contact's simplios_message field via ghl-update-contact-field Edge Function
+// This triggers the GHL workflow to send the WhatsApp template
+const TEMPLATE_FIELD_KEY = "simplios_message";
+
+async function updateContactFieldForTemplate(
+  locationId: string,
+  leadId: string,
+  message: string
+): Promise<{ success: boolean; messageId?: string; error?: string }> {
+  try {
+    // Call the existing ghl-update-contact-field Edge Function
+    // This is the same function SimpliOS Inbox uses
+    const endpoint = `${SUPABASE_URL}/functions/v1/ghl-update-contact-field`;
+
+    console.log(`[SendScheduledFollowups] Calling ghl-update-contact-field for lead ${leadId}...`);
+
+    const response = await fetch(endpoint, {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        location_id: locationId,
+        lead_id: leadId,
+        field_key: TEMPLATE_FIELD_KEY,
+        field_value: message,
+        clear_first: true
+      })
+    });
+
+    const responseText = await response.text();
+    console.log(`[SendScheduledFollowups] ghl-update-contact-field response:`, response.status, responseText);
+
+    if (!response.ok) {
+      return { success: false, error: `Update field error: ${response.status} - ${responseText}` };
+    }
+
+    const result = JSON.parse(responseText);
+    if (!result.success) {
+      return { success: false, error: result.error || "Unknown error" };
+    }
+
+    console.log(`[SendScheduledFollowups] Field updated, GHL workflow will send template`);
+
+    // Return success - the messageId will be generated by GHL workflow
+    return { success: true, messageId: `template_${Date.now()}` };
   } catch (err: any) {
     return { success: false, error: err.message };
   }
