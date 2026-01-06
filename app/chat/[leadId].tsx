@@ -10,13 +10,17 @@ import {
   KeyboardAvoidingView,
   Platform,
   Alert,
+  Modal,
+  Image,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { Feather } from '@expo/vector-icons';
+import * as ImagePicker from 'expo-image-picker';
+import { Audio } from 'expo-av';
 import { useAuth } from '../../lib/auth';
 import { getLead, getMessages, sendMessage, Lead, Message } from '../../lib/database';
-import { sendCRMMessage, subscribeToMessages, checkCRMConnection } from '../../lib/crm';
+import { sendCRMMessage, sendCRMMedia, subscribeToMessages, checkCRMConnection } from '../../lib/crm';
 
 interface PendingQuestion {
   id: string;
@@ -52,6 +56,15 @@ export default function ChatScreen() {
   const [messageType, setMessageType] = useState<'WhatsApp' | 'SMS' | 'Email'>('WhatsApp');
   const [pendingQuestions, setPendingQuestions] = useState<PendingQuestion[]>([]);
   const messageRefs = useRef<{ [key: string]: number }>({});
+
+  // Media states
+  const [showMediaMenu, setShowMediaMenu] = useState(false);
+  const [isRecording, setIsRecording] = useState(false);
+  const [recordingDuration, setRecordingDuration] = useState(0);
+  const [uploadingMedia, setUploadingMedia] = useState(false);
+  const [selectedMedia, setSelectedMedia] = useState<{ uri: string; type: 'image' | 'video' | 'audio'; name: string } | null>(null);
+  const recordingRef = useRef<Audio.Recording | null>(null);
+  const recordingTimerRef = useRef<NodeJS.Timeout | null>(null);
 
   // Load data and check CRM connection
   useEffect(() => {
@@ -218,6 +231,214 @@ export default function ChatScreen() {
       setNewMessage(messageContent); // Restore message on error
     } finally {
       setSending(false);
+    }
+  };
+
+  // Handle taking a photo
+  const handleTakePhoto = async () => {
+    setShowMediaMenu(false);
+
+    const permission = await ImagePicker.requestCameraPermissionsAsync();
+    if (!permission.granted) {
+      Alert.alert('Berechtigung erforderlich', 'Bitte erlaube den Kamerazugriff in den Einstellungen.');
+      return;
+    }
+
+    try {
+      const result = await ImagePicker.launchCameraAsync({
+        mediaTypes: ImagePicker.MediaTypeOptions.All,
+        quality: 0.8,
+        videoMaxDuration: 60,
+      });
+
+      if (!result.canceled && result.assets && result.assets.length > 0) {
+        const asset = result.assets[0];
+        const isVideo = asset.type === 'video';
+        const filename = isVideo ? `video_${Date.now()}.mp4` : `foto_${Date.now()}.jpg`;
+
+        setSelectedMedia({
+          uri: asset.uri,
+          type: isVideo ? 'video' : 'image',
+          name: filename,
+        });
+      }
+    } catch (error) {
+      Alert.alert('Fehler', 'Beim Fotografieren ist ein Fehler aufgetreten.');
+    }
+  };
+
+  // Handle picking from gallery
+  const handlePickMedia = async () => {
+    setShowMediaMenu(false);
+
+    const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (!permission.granted) {
+      Alert.alert('Berechtigung erforderlich', 'Bitte erlaube den Galerie-Zugriff in den Einstellungen.');
+      return;
+    }
+
+    try {
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ImagePicker.MediaTypeOptions.All,
+        quality: 0.8,
+        videoMaxDuration: 60,
+      });
+
+      if (!result.canceled && result.assets && result.assets.length > 0) {
+        const asset = result.assets[0];
+        const isVideo = asset.type === 'video';
+        const filename = asset.fileName || (isVideo ? `video_${Date.now()}.mp4` : `bild_${Date.now()}.jpg`);
+
+        setSelectedMedia({
+          uri: asset.uri,
+          type: isVideo ? 'video' : 'image',
+          name: filename,
+        });
+      }
+    } catch (error) {
+      Alert.alert('Fehler', 'Beim Auswählen ist ein Fehler aufgetreten.');
+    }
+  };
+
+  // Handle voice recording
+  const handleStartRecording = async () => {
+    setShowMediaMenu(false);
+
+    try {
+      const permission = await Audio.requestPermissionsAsync();
+      if (!permission.granted) {
+        Alert.alert('Berechtigung erforderlich', 'Bitte erlaube den Mikrofon-Zugriff in den Einstellungen.');
+        return;
+      }
+
+      await Audio.setAudioModeAsync({
+        allowsRecordingIOS: true,
+        playsInSilentModeIOS: true,
+      });
+
+      const { recording } = await Audio.Recording.createAsync(
+        Audio.RecordingOptionsPresets.HIGH_QUALITY
+      );
+
+      recordingRef.current = recording;
+      setIsRecording(true);
+      setRecordingDuration(0);
+
+      // Start duration timer
+      recordingTimerRef.current = setInterval(() => {
+        setRecordingDuration(prev => prev + 1);
+      }, 1000);
+    } catch (error) {
+      console.error('Recording error:', error);
+      Alert.alert('Fehler', 'Aufnahme konnte nicht gestartet werden.');
+    }
+  };
+
+  const handleStopRecording = async () => {
+    if (!recordingRef.current) return;
+
+    try {
+      // Stop timer
+      if (recordingTimerRef.current) {
+        clearInterval(recordingTimerRef.current);
+        recordingTimerRef.current = null;
+      }
+
+      await recordingRef.current.stopAndUnloadAsync();
+      const uri = recordingRef.current.getURI();
+
+      if (uri) {
+        setSelectedMedia({
+          uri,
+          type: 'audio',
+          name: `sprachnachricht_${Date.now()}.m4a`,
+        });
+      }
+
+      recordingRef.current = null;
+      setIsRecording(false);
+      setRecordingDuration(0);
+    } catch (error) {
+      console.error('Stop recording error:', error);
+      Alert.alert('Fehler', 'Aufnahme konnte nicht gestoppt werden.');
+    }
+  };
+
+  const handleCancelRecording = async () => {
+    if (!recordingRef.current) return;
+
+    try {
+      if (recordingTimerRef.current) {
+        clearInterval(recordingTimerRef.current);
+        recordingTimerRef.current = null;
+      }
+
+      await recordingRef.current.stopAndUnloadAsync();
+      recordingRef.current = null;
+      setIsRecording(false);
+      setRecordingDuration(0);
+    } catch (error) {
+      console.error('Cancel recording error:', error);
+    }
+  };
+
+  // Format recording duration
+  const formatDuration = (seconds: number) => {
+    const mins = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    return `${mins}:${secs.toString().padStart(2, '0')}`;
+  };
+
+  // Send media
+  const handleSendMedia = async () => {
+    if (!selectedMedia || !user?.id || !leadId) return;
+
+    setUploadingMedia(true);
+
+    try {
+      if (crmConnected && lead?.ghl_contact_id) {
+        // Send via CRM
+        const result = await sendCRMMedia(user.id, leadId, selectedMedia.uri, selectedMedia.type, selectedMedia.name);
+
+        if (!result.success) {
+          Alert.alert('Fehler', result.error || 'Media konnte nicht gesendet werden');
+          return;
+        }
+
+        // Add optimistic message
+        const optimisticMessage: Message = {
+          id: `temp_${Date.now()}`,
+          lead_id: leadId,
+          user_id: user.id,
+          content: `[${selectedMedia.type === 'audio' ? 'Sprachnachricht' : selectedMedia.type === 'video' ? 'Video' : 'Bild'}]`,
+          type: 'outgoing',
+          is_template: false,
+          created_at: new Date().toISOString(),
+        };
+        setMessages(prev => [...prev, optimisticMessage]);
+      } else {
+        // Local only - just show message
+        const message = await sendMessage({
+          lead_id: leadId,
+          user_id: user.id,
+          content: `[${selectedMedia.type === 'audio' ? 'Sprachnachricht' : selectedMedia.type === 'video' ? 'Video' : 'Bild'}: ${selectedMedia.name}]`,
+          type: 'outgoing',
+        });
+
+        if (message) {
+          setMessages(prev => [...prev, message]);
+        }
+      }
+
+      setSelectedMedia(null);
+      setTimeout(() => {
+        scrollViewRef.current?.scrollToEnd({ animated: true });
+      }, 100);
+    } catch (error) {
+      console.error('Error sending media:', error);
+      Alert.alert('Fehler', 'Media konnte nicht gesendet werden');
+    } finally {
+      setUploadingMedia(false);
     }
   };
 
@@ -418,57 +639,181 @@ export default function ChatScreen() {
           )}
         </ScrollView>
 
-        {/* Input */}
-        <View style={styles.inputContainer}>
-          {/* Channel Selector - only show when CRM connected */}
-          {crmConnected && lead?.ghl_contact_id && (
-            <View style={styles.channelSelector}>
+        {/* Selected Media Preview */}
+        {selectedMedia && (
+          <View style={styles.mediaPreviewContainer}>
+            <View style={styles.mediaPreviewContent}>
+              {selectedMedia.type === 'image' && (
+                <Image source={{ uri: selectedMedia.uri }} style={styles.mediaPreviewImage} />
+              )}
+              {selectedMedia.type === 'video' && (
+                <View style={styles.mediaPreviewVideo}>
+                  <Feather name="video" size={32} color="#FFFFFF" />
+                  <Text style={styles.mediaPreviewVideoText}>Video</Text>
+                </View>
+              )}
+              {selectedMedia.type === 'audio' && (
+                <View style={styles.mediaPreviewAudio}>
+                  <Feather name="mic" size={32} color="#F97316" />
+                  <Text style={styles.mediaPreviewAudioText}>Sprachnachricht</Text>
+                </View>
+              )}
+            </View>
+            <View style={styles.mediaPreviewActions}>
               <TouchableOpacity
-                style={[styles.channelButton, messageType === 'WhatsApp' && styles.channelButtonActive]}
-                onPress={() => setMessageType('WhatsApp')}
+                style={styles.mediaPreviewCancel}
+                onPress={() => setSelectedMedia(null)}
               >
-                <Feather name="message-circle" size={14} color={messageType === 'WhatsApp' ? '#FFFFFF' : '#6B7280'} />
-                <Text style={[styles.channelButtonText, messageType === 'WhatsApp' && styles.channelButtonTextActive]}>WhatsApp</Text>
+                <Feather name="x" size={20} color="#6B7280" />
               </TouchableOpacity>
               <TouchableOpacity
-                style={[styles.channelButton, messageType === 'SMS' && styles.channelButtonActive]}
-                onPress={() => setMessageType('SMS')}
+                style={styles.mediaPreviewSend}
+                onPress={handleSendMedia}
+                disabled={uploadingMedia}
               >
-                <Feather name="smartphone" size={14} color={messageType === 'SMS' ? '#FFFFFF' : '#6B7280'} />
-                <Text style={[styles.channelButtonText, messageType === 'SMS' && styles.channelButtonTextActive]}>SMS</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[styles.channelButton, messageType === 'Email' && styles.channelButtonActive]}
-                onPress={() => setMessageType('Email')}
-              >
-                <Feather name="mail" size={14} color={messageType === 'Email' ? '#FFFFFF' : '#6B7280'} />
-                <Text style={[styles.channelButtonText, messageType === 'Email' && styles.channelButtonTextActive]}>Email</Text>
+                {uploadingMedia ? (
+                  <ActivityIndicator size="small" color="#FFFFFF" />
+                ) : (
+                  <Feather name="send" size={20} color="#FFFFFF" />
+                )}
               </TouchableOpacity>
             </View>
-          )}
-          <View style={styles.inputWrapper}>
-            <TextInput
-              style={styles.textInput}
-              placeholder={crmConnected ? `${messageType} schreiben...` : "Nachricht schreiben..."}
-              placeholderTextColor="#9CA3AF"
-              value={newMessage}
-              onChangeText={setNewMessage}
-              multiline
-              maxLength={1000}
-            />
-            <TouchableOpacity
-              style={[styles.sendButton, !newMessage.trim() && styles.sendButtonDisabled]}
-              onPress={handleSend}
-              disabled={!newMessage.trim() || sending}
-            >
-              {sending ? (
-                <ActivityIndicator size="small" color="#FFFFFF" />
-              ) : (
-                <Feather name="send" size={20} color="#FFFFFF" />
-              )}
-            </TouchableOpacity>
           </View>
-        </View>
+        )}
+
+        {/* Recording UI */}
+        {isRecording && (
+          <View style={styles.recordingContainer}>
+            <View style={styles.recordingIndicator}>
+              <View style={styles.recordingDot} />
+              <Text style={styles.recordingText}>Aufnahme läuft</Text>
+              <Text style={styles.recordingDuration}>{formatDuration(recordingDuration)}</Text>
+            </View>
+            <View style={styles.recordingActions}>
+              <TouchableOpacity style={styles.recordingCancel} onPress={handleCancelRecording}>
+                <Feather name="x" size={24} color="#EF4444" />
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.recordingStop} onPress={handleStopRecording}>
+                <Feather name="check" size={24} color="#FFFFFF" />
+              </TouchableOpacity>
+            </View>
+          </View>
+        )}
+
+        {/* Input */}
+        {!isRecording && !selectedMedia && (
+          <View style={styles.inputContainer}>
+            {/* Channel Selector - only show when CRM connected */}
+            {crmConnected && lead?.ghl_contact_id && (
+              <View style={styles.channelSelector}>
+                <TouchableOpacity
+                  style={[styles.channelButton, messageType === 'WhatsApp' && styles.channelButtonActive]}
+                  onPress={() => setMessageType('WhatsApp')}
+                >
+                  <Feather name="message-circle" size={14} color={messageType === 'WhatsApp' ? '#FFFFFF' : '#6B7280'} />
+                  <Text style={[styles.channelButtonText, messageType === 'WhatsApp' && styles.channelButtonTextActive]}>WhatsApp</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.channelButton, messageType === 'SMS' && styles.channelButtonActive]}
+                  onPress={() => setMessageType('SMS')}
+                >
+                  <Feather name="smartphone" size={14} color={messageType === 'SMS' ? '#FFFFFF' : '#6B7280'} />
+                  <Text style={[styles.channelButtonText, messageType === 'SMS' && styles.channelButtonTextActive]}>SMS</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.channelButton, messageType === 'Email' && styles.channelButtonActive]}
+                  onPress={() => setMessageType('Email')}
+                >
+                  <Feather name="mail" size={14} color={messageType === 'Email' ? '#FFFFFF' : '#6B7280'} />
+                  <Text style={[styles.channelButtonText, messageType === 'Email' && styles.channelButtonTextActive]}>Email</Text>
+                </TouchableOpacity>
+              </View>
+            )}
+            <View style={styles.inputWrapper}>
+              <TouchableOpacity style={styles.attachButton} onPress={() => setShowMediaMenu(true)}>
+                <Feather name="plus" size={22} color="#6B7280" />
+              </TouchableOpacity>
+              <TextInput
+                style={styles.textInput}
+                placeholder={crmConnected ? `${messageType} schreiben...` : "Nachricht schreiben..."}
+                placeholderTextColor="#9CA3AF"
+                value={newMessage}
+                onChangeText={setNewMessage}
+                multiline
+                maxLength={1000}
+              />
+              {newMessage.trim() ? (
+                <TouchableOpacity
+                  style={styles.sendButton}
+                  onPress={handleSend}
+                  disabled={sending}
+                >
+                  {sending ? (
+                    <ActivityIndicator size="small" color="#FFFFFF" />
+                  ) : (
+                    <Feather name="send" size={20} color="#FFFFFF" />
+                  )}
+                </TouchableOpacity>
+              ) : (
+                <TouchableOpacity style={styles.micButton} onPress={handleStartRecording}>
+                  <Feather name="mic" size={20} color="#F97316" />
+                </TouchableOpacity>
+              )}
+            </View>
+          </View>
+        )}
+
+        {/* Media Menu Modal */}
+        <Modal
+          visible={showMediaMenu}
+          transparent={true}
+          animationType="slide"
+          onRequestClose={() => setShowMediaMenu(false)}
+        >
+          <TouchableOpacity
+            style={styles.mediaMenuOverlay}
+            activeOpacity={1}
+            onPress={() => setShowMediaMenu(false)}
+          >
+            <View style={styles.mediaMenuContent}>
+              <View style={styles.mediaMenuHandle} />
+              <Text style={styles.mediaMenuTitle}>Anhang hinzufügen</Text>
+
+              <View style={styles.mediaMenuOptions}>
+                <TouchableOpacity style={styles.mediaMenuOption} onPress={handleTakePhoto}>
+                  <View style={[styles.mediaMenuIcon, { backgroundColor: '#DBEAFE' }]}>
+                    <Feather name="camera" size={24} color="#3B82F6" />
+                  </View>
+                  <Text style={styles.mediaMenuLabel}>Kamera</Text>
+                  <Text style={styles.mediaMenuSublabel}>Foto/Video aufnehmen</Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity style={styles.mediaMenuOption} onPress={handlePickMedia}>
+                  <View style={[styles.mediaMenuIcon, { backgroundColor: '#D1FAE5' }]}>
+                    <Feather name="image" size={24} color="#22C55E" />
+                  </View>
+                  <Text style={styles.mediaMenuLabel}>Galerie</Text>
+                  <Text style={styles.mediaMenuSublabel}>Bild/Video auswählen</Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity style={styles.mediaMenuOption} onPress={handleStartRecording}>
+                  <View style={[styles.mediaMenuIcon, { backgroundColor: '#FFF7ED' }]}>
+                    <Feather name="mic" size={24} color="#F97316" />
+                  </View>
+                  <Text style={styles.mediaMenuLabel}>Sprachnachricht</Text>
+                  <Text style={styles.mediaMenuSublabel}>Audio aufnehmen</Text>
+                </TouchableOpacity>
+              </View>
+
+              <TouchableOpacity
+                style={styles.mediaMenuCancel}
+                onPress={() => setShowMediaMenu(false)}
+              >
+                <Text style={styles.mediaMenuCancelText}>Abbrechen</Text>
+              </TouchableOpacity>
+            </View>
+          </TouchableOpacity>
+        </Modal>
       </KeyboardAvoidingView>
     </SafeAreaView>
   );
@@ -518,10 +863,44 @@ const styles = StyleSheet.create({
   channelButtonActive: { backgroundColor: '#F97316' },
   channelButtonText: { fontSize: 12, fontFamily: 'DMSans-Medium', color: '#6B7280' },
   channelButtonTextActive: { color: '#FFFFFF' },
-  inputWrapper: { flexDirection: 'row', alignItems: 'flex-end', backgroundColor: '#F3F4F6', borderRadius: 24, paddingLeft: 16, paddingRight: 4, paddingVertical: 4 },
-  textInput: { flex: 1, fontSize: 15, fontFamily: 'DMSans-Regular', color: '#111827', maxHeight: 100, paddingVertical: 8 },
+  inputWrapper: { flexDirection: 'row', alignItems: 'flex-end', backgroundColor: '#F3F4F6', borderRadius: 24, paddingLeft: 4, paddingRight: 4, paddingVertical: 4 },
+  attachButton: { width: 40, height: 40, borderRadius: 20, justifyContent: 'center', alignItems: 'center' },
+  textInput: { flex: 1, fontSize: 15, fontFamily: 'DMSans-Regular', color: '#111827', maxHeight: 100, paddingVertical: 8, paddingHorizontal: 8 },
   sendButton: { width: 40, height: 40, borderRadius: 20, backgroundColor: '#F97316', justifyContent: 'center', alignItems: 'center' },
   sendButtonDisabled: { backgroundColor: '#D1D5DB' },
+  micButton: { width: 40, height: 40, borderRadius: 20, backgroundColor: '#FFF7ED', justifyContent: 'center', alignItems: 'center' },
+  // Media Menu
+  mediaMenuOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' },
+  mediaMenuContent: { backgroundColor: '#FFFFFF', borderTopLeftRadius: 24, borderTopRightRadius: 24, padding: 24, paddingBottom: 40 },
+  mediaMenuHandle: { width: 40, height: 4, backgroundColor: '#E5E7EB', borderRadius: 2, alignSelf: 'center', marginBottom: 20 },
+  mediaMenuTitle: { fontSize: 18, fontFamily: 'DMSans-SemiBold', color: '#111827', marginBottom: 20, textAlign: 'center' },
+  mediaMenuOptions: { flexDirection: 'row', justifyContent: 'space-around', marginBottom: 24 },
+  mediaMenuOption: { alignItems: 'center', flex: 1 },
+  mediaMenuIcon: { width: 60, height: 60, borderRadius: 20, justifyContent: 'center', alignItems: 'center', marginBottom: 8 },
+  mediaMenuLabel: { fontSize: 14, fontFamily: 'DMSans-SemiBold', color: '#111827' },
+  mediaMenuSublabel: { fontSize: 11, fontFamily: 'DMSans-Regular', color: '#6B7280', marginTop: 2, textAlign: 'center' },
+  mediaMenuCancel: { paddingVertical: 14, backgroundColor: '#F3F4F6', borderRadius: 12, alignItems: 'center' },
+  mediaMenuCancelText: { fontSize: 15, fontFamily: 'DMSans-Medium', color: '#6B7280' },
+  // Recording UI
+  recordingContainer: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', backgroundColor: '#FEE2E2', paddingHorizontal: 16, paddingVertical: 12, borderTopWidth: 1, borderTopColor: '#FECACA' },
+  recordingIndicator: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  recordingDot: { width: 12, height: 12, borderRadius: 6, backgroundColor: '#EF4444' },
+  recordingText: { fontSize: 14, fontFamily: 'DMSans-Medium', color: '#DC2626' },
+  recordingDuration: { fontSize: 14, fontFamily: 'DMSans-SemiBold', color: '#DC2626', marginLeft: 8 },
+  recordingActions: { flexDirection: 'row', gap: 12 },
+  recordingCancel: { width: 44, height: 44, borderRadius: 22, backgroundColor: '#FEE2E2', justifyContent: 'center', alignItems: 'center', borderWidth: 2, borderColor: '#EF4444' },
+  recordingStop: { width: 44, height: 44, borderRadius: 22, backgroundColor: '#22C55E', justifyContent: 'center', alignItems: 'center' },
+  // Media Preview
+  mediaPreviewContainer: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#FFFFFF', paddingHorizontal: 16, paddingVertical: 12, borderTopWidth: 1, borderTopColor: '#F3F4F6', gap: 12 },
+  mediaPreviewContent: { flex: 1 },
+  mediaPreviewImage: { width: 80, height: 80, borderRadius: 12 },
+  mediaPreviewVideo: { width: 80, height: 80, borderRadius: 12, backgroundColor: '#3B82F6', justifyContent: 'center', alignItems: 'center' },
+  mediaPreviewVideoText: { fontSize: 11, fontFamily: 'DMSans-Medium', color: '#FFFFFF', marginTop: 4 },
+  mediaPreviewAudio: { flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: '#FFF7ED', paddingHorizontal: 16, paddingVertical: 12, borderRadius: 12 },
+  mediaPreviewAudioText: { fontSize: 14, fontFamily: 'DMSans-Medium', color: '#F97316' },
+  mediaPreviewActions: { flexDirection: 'row', gap: 8 },
+  mediaPreviewCancel: { width: 40, height: 40, borderRadius: 20, backgroundColor: '#F3F4F6', justifyContent: 'center', alignItems: 'center' },
+  mediaPreviewSend: { width: 40, height: 40, borderRadius: 20, backgroundColor: '#F97316', justifyContent: 'center', alignItems: 'center' },
   // Pending Questions
   pendingBanner: {
     backgroundColor: '#FEF2F2',

@@ -29,6 +29,8 @@ export interface CRMSyncResult {
  */
 export async function checkCRMConnection(userId: string): Promise<CRMConnection | null> {
   try {
+    console.log('[CRM] Checking connection for user:', userId);
+
     const { data, error } = await supabase
       .from('ghl_connections')
       .select('*')
@@ -38,15 +40,17 @@ export async function checkCRMConnection(userId: string): Promise<CRMConnection 
 
     if (error) {
       if (error.code === 'PGRST116' || error.code === '42P01' || error.code === 'PGRST204') {
+        console.log('[CRM] No connection found for user (error code:', error.code, ')');
         return null;
       }
-      console.error('Error checking CRM connection:', error.code, error.message);
+      console.error('[CRM] Error checking connection:', error.code, error.message);
       return null;
     }
 
+    console.log('[CRM] Found connection:', data?.location_id, data?.location_name);
     return data as CRMConnection;
   } catch (error) {
-    console.error('Exception checking CRM connection:', error);
+    console.error('[CRM] Exception checking connection:', error);
     return null;
   }
 }
@@ -182,6 +186,59 @@ export async function sendCRMMessage(
     return { success: true, messageId: result.message_id };
   } catch (error) {
     console.error('Send message error:', error);
+    return { success: false, error: error instanceof Error ? error.message : 'Unknown error' };
+  }
+}
+
+/**
+ * Send media (image, video, audio) via CRM
+ */
+export async function sendCRMMedia(
+  userId: string,
+  leadId: string,
+  fileUri: string,
+  mediaType: 'image' | 'video' | 'audio',
+  fileName: string
+): Promise<{ success: boolean; messageId?: string; error?: string }> {
+  try {
+    const { data: { session } } = await supabase.auth.getSession();
+
+    if (!session?.access_token) {
+      return { success: false, error: 'Not authenticated' };
+    }
+
+    // Read file as blob
+    const response = await fetch(fileUri);
+    const blob = await response.blob();
+
+    // Create FormData
+    const formData = new FormData();
+    formData.append('file', {
+      uri: fileUri,
+      name: fileName,
+      type: mediaType === 'audio' ? 'audio/m4a' : mediaType === 'video' ? 'video/mp4' : 'image/jpeg',
+    } as any);
+    formData.append('user_id', userId);
+    formData.append('lead_id', leadId);
+    formData.append('media_type', mediaType);
+
+    const uploadResponse = await fetch(`${SUPABASE_FUNCTIONS_URL}/ghl-send-media`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${session.access_token}`,
+      },
+      body: formData,
+    });
+
+    if (!uploadResponse.ok) {
+      const errorData = await uploadResponse.json().catch(() => ({}));
+      return { success: false, error: errorData.error || `Failed: ${uploadResponse.status}` };
+    }
+
+    const result = await uploadResponse.json();
+    return { success: true, messageId: result.message_id };
+  } catch (error) {
+    console.error('Send media error:', error);
     return { success: false, error: error instanceof Error ? error.message : 'Unknown error' };
   }
 }
