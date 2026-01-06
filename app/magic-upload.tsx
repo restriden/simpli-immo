@@ -115,6 +115,7 @@ export default function MagicUploadScreen() {
   const [analysisResult, setAnalysisResult] = useState<AnalysisResult | null>(null);
   const [editedData, setEditedData] = useState<ExtractedData | null>(null);
   const [processing, setProcessing] = useState(false);
+  const [loadingButton, setLoadingButton] = useState<'pdf' | 'photo' | 'gallery' | null>(null);
 
   // Upload und KI-Analyse durchführen
   const analyzeDocument = async (fileUri: string, fileName: string, mimeType: string) => {
@@ -166,6 +167,7 @@ export default function MagicUploadScreen() {
       console.error('Analyse error:', error);
       Alert.alert('Fehler', error.message || 'Bei der Analyse ist ein Fehler aufgetreten.');
       setStep('upload');
+      setLoadingButton(null);
     } finally {
       setProcessing(false);
     }
@@ -173,6 +175,7 @@ export default function MagicUploadScreen() {
 
   // PDF auswählen
   const handlePickDocument = async () => {
+    setLoadingButton('pdf');
     try {
       const result = await DocumentPicker.getDocumentAsync({
         type: ['application/pdf', 'image/*'],
@@ -186,8 +189,11 @@ export default function MagicUploadScreen() {
           setFilePreview(file.uri);
         }
         await analyzeDocument(file.uri, file.name, file.mimeType || 'application/pdf');
+      } else {
+        setLoadingButton(null);
       }
     } catch (error) {
+      setLoadingButton(null);
       Alert.alert('Fehler', 'Beim Hochladen ist ein Fehler aufgetreten.');
     }
   };
@@ -200,6 +206,7 @@ export default function MagicUploadScreen() {
       return;
     }
 
+    setLoadingButton('photo');
     try {
       const result = await ImagePicker.launchCameraAsync({
         mediaTypes: ImagePicker.MediaTypeOptions.Images,
@@ -212,8 +219,11 @@ export default function MagicUploadScreen() {
         setFileName(filename);
         setFilePreview(asset.uri);
         await analyzeDocument(asset.uri, filename, 'image/jpeg');
+      } else {
+        setLoadingButton(null);
       }
     } catch (error) {
+      setLoadingButton(null);
       Alert.alert('Fehler', 'Beim Fotografieren ist ein Fehler aufgetreten.');
     }
   };
@@ -226,6 +236,7 @@ export default function MagicUploadScreen() {
       return;
     }
 
+    setLoadingButton('gallery');
     try {
       const result = await ImagePicker.launchImageLibraryAsync({
         mediaTypes: ImagePicker.MediaTypeOptions.Images,
@@ -238,18 +249,22 @@ export default function MagicUploadScreen() {
         setFileName(filename);
         setFilePreview(asset.uri);
         await analyzeDocument(asset.uri, filename, 'image/jpeg');
+      } else {
+        setLoadingButton(null);
       }
     } catch (error) {
+      setLoadingButton(null);
       Alert.alert('Fehler', 'Beim Auswählen ist ein Fehler aufgetreten.');
     }
   };
 
-  // Daten speichern
+  // Daten speichern und Objekt aktivieren
   const handleSave = async () => {
     if (!objektId || !editedData) return;
 
     try {
-      await updateObjekt(objektId, editedData);
+      // Update data and set status to 'aktiv' (activating the object)
+      await updateObjekt(objektId, { ...editedData, status: 'aktiv' });
       setStep('success');
     } catch (error) {
       Alert.alert('Fehler', 'Beim Speichern ist ein Fehler aufgetreten.');
@@ -294,28 +309,58 @@ export default function MagicUploadScreen() {
 
       {/* Upload-Optionen */}
       <View style={styles.uploadOptions}>
-        <TouchableOpacity style={styles.uploadOptionButton} onPress={handlePickDocument}>
+        <TouchableOpacity
+          style={[styles.uploadOptionButton, loadingButton === 'pdf' && styles.uploadOptionButtonLoading]}
+          onPress={handlePickDocument}
+          disabled={loadingButton !== null}
+        >
           <View style={[styles.uploadOptionIcon, { backgroundColor: '#FFF7ED' }]}>
-            <Feather name="file-plus" size={24} color="#F97316" />
+            {loadingButton === 'pdf' ? (
+              <ActivityIndicator size="small" color="#F97316" />
+            ) : (
+              <Feather name="file-plus" size={24} color="#F97316" />
+            )}
           </View>
           <Text style={styles.uploadOptionTitle}>PDF/Bild</Text>
-          <Text style={styles.uploadOptionText}>Datei auswählen</Text>
+          <Text style={styles.uploadOptionText}>
+            {loadingButton === 'pdf' ? 'Wird geladen...' : 'Datei auswählen'}
+          </Text>
         </TouchableOpacity>
 
-        <TouchableOpacity style={styles.uploadOptionButton} onPress={handleTakePhoto}>
+        <TouchableOpacity
+          style={[styles.uploadOptionButton, loadingButton === 'photo' && styles.uploadOptionButtonLoading]}
+          onPress={handleTakePhoto}
+          disabled={loadingButton !== null}
+        >
           <View style={[styles.uploadOptionIcon, { backgroundColor: '#DBEAFE' }]}>
-            <Feather name="camera" size={24} color="#3B82F6" />
+            {loadingButton === 'photo' ? (
+              <ActivityIndicator size="small" color="#3B82F6" />
+            ) : (
+              <Feather name="camera" size={24} color="#3B82F6" />
+            )}
           </View>
           <Text style={styles.uploadOptionTitle}>Foto</Text>
-          <Text style={styles.uploadOptionText}>Jetzt aufnehmen</Text>
+          <Text style={styles.uploadOptionText}>
+            {loadingButton === 'photo' ? 'Wird geladen...' : 'Jetzt aufnehmen'}
+          </Text>
         </TouchableOpacity>
 
-        <TouchableOpacity style={styles.uploadOptionButton} onPress={handlePickImage}>
+        <TouchableOpacity
+          style={[styles.uploadOptionButton, loadingButton === 'gallery' && styles.uploadOptionButtonLoading]}
+          onPress={handlePickImage}
+          disabled={loadingButton !== null}
+        >
           <View style={[styles.uploadOptionIcon, { backgroundColor: '#D1FAE5' }]}>
-            <Feather name="image" size={24} color="#22C55E" />
+            {loadingButton === 'gallery' ? (
+              <ActivityIndicator size="small" color="#22C55E" />
+            ) : (
+              <Feather name="image" size={24} color="#22C55E" />
+            )}
           </View>
           <Text style={styles.uploadOptionTitle}>Galerie</Text>
-          <Text style={styles.uploadOptionText}>Bild wählen</Text>
+          <Text style={styles.uploadOptionText}>
+            {loadingButton === 'gallery' ? 'Wird geladen...' : 'Bild wählen'}
+          </Text>
         </TouchableOpacity>
       </View>
 
@@ -480,9 +525,9 @@ export default function MagicUploadScreen() {
         <Feather name="check-circle" size={80} color="#22C55E" />
       </View>
 
-      <Text style={styles.successTitle}>Daten erfolgreich aktualisiert!</Text>
+      <Text style={styles.successTitle}>Objekt aktiviert!</Text>
       <Text style={styles.successSubtitle}>
-        Die extrahierten Daten wurden gespeichert und die Vollständigkeit des Objekts erhöht.
+        Die extrahierten Daten wurden gespeichert und das Objekt ist jetzt aktiv.
       </Text>
 
       <View style={styles.successStats}>
@@ -616,6 +661,7 @@ const styles = StyleSheet.create({
   // Upload Options
   uploadOptions: { flexDirection: 'row', gap: 12, width: '100%', marginBottom: 24 },
   uploadOptionButton: { flex: 1, backgroundColor: '#F9FAFB', borderRadius: 16, padding: 16, alignItems: 'center', borderWidth: 1, borderColor: '#E5E7EB' },
+  uploadOptionButtonLoading: { backgroundColor: '#FFFFFF', borderColor: '#F97316', borderWidth: 2 },
   uploadOptionIcon: { width: 52, height: 52, borderRadius: 14, justifyContent: 'center', alignItems: 'center', marginBottom: 10 },
   uploadOptionTitle: { fontSize: 14, fontFamily: 'DMSans-SemiBold', color: '#111827' },
   uploadOptionText: { fontSize: 11, fontFamily: 'DMSans-Regular', color: '#6B7280', marginTop: 2 },
