@@ -29,13 +29,27 @@ const corsHeaders = {
 };
 
 // Pipeline stage mapping (clean names without emojis for DB storage)
+// Keys must use ASCII equivalents (u instead of ü, etc.) to match normalization
 const STAGE_MAPPING: Record<string, string> = {
+  // Beratung stages (consultation booked or later)
   "finanzierungsberatung gebucht": "beratung_gebucht",
-  "finanzierung blockiert": "blockiert",
-  "finanzierungsbestätigung ausgestellt": "bestaetigung_ausgestellt",
+  "termin vereinbart": "beratung_gebucht",
+  "unterlagen angefordert": "beratung_gebucht",
+  "unterlagen in prufung": "beratung_gebucht", // ü -> u
+  // Confirmation stages
+  "finanzierungsbestatigung ausgestellt": "bestaetigung_ausgestellt", // ä -> a
+  "finanzierbar aber objekt nicht gekauft": "bestaetigung_ausgestellt",
+  // Credit stages
   "warte auf kreditentscheidung": "warte_auf_kredit",
+  // Contract stages
   "vertrag unterschrieben": "vertrag_unterschrieben",
+  // Payout stages
   "auszahlung erhalten": "auszahlung_erhalten",
+  // Negative stages
+  "finanzierung blockiert": "blockiert",
+  "noshow": "no_show",
+  "abgesagt": "abgesagt",
+  "abgelehnt nicht geeignet lost": "abgelehnt",
 };
 
 interface GHLConnection {
@@ -79,6 +93,15 @@ interface Contact {
   name?: string;
   firstName?: string;
   lastName?: string;
+}
+
+interface Appointment {
+  id: string;
+  title: string;
+  startTime: string;
+  endTime?: string;
+  status: string; // "confirmed", "cancelled", "no_show", etc.
+  contactId: string;
 }
 
 function jsonResponse(data: unknown, status = 200) {
@@ -285,20 +308,43 @@ serve(async (req: Request) => {
 
     // Step 4: Get all Makler leads (non-archived, with email or phone)
     // Note: Using neq("is_archived", true) to include both null and false
+    // IMPORTANT: Fetch ALL leads with pagination (Supabase default limit is 1000)
     console.log("Fetching Makler leads...");
-    const { data: maklerLeads, error: leadsError } = await supabase
-      .from("leads")
-      .select("id, email, phone, name, sf_opportunity_id, sf_pipeline_stage, ghl_location_id")
-      .or("email.not.is.null,phone.not.is.null")
-      .neq("ghl_location_id", SIMPLI_FINANCE_LOCATION_ID) // Exclude SF's own contacts
-      .neq("is_archived", true); // Exclude archived leads (includes null and false)
+    let maklerLeads: any[] = [];
+    let offset = 0;
+    const pageSize = 1000;
 
-    if (leadsError) {
-      console.error("Error fetching leads:", leadsError);
-      return jsonResponse({ error: "Failed to fetch leads" }, 500);
+    while (true) {
+      const { data: page, error: leadsError } = await supabase
+        .from("leads")
+        .select(`
+          id, email, phone, name, sf_opportunity_id, sf_pipeline_stage, ghl_location_id,
+          sf_reached_beratung, sf_reached_bestaetigung, sf_reached_warte_kredit,
+          sf_reached_vertrag, sf_reached_auszahlung, sf_reached_blockiert,
+          sf_reached_beratung_at, sf_reached_bestaetigung_at, sf_reached_warte_kredit_at,
+          sf_reached_vertrag_at, sf_reached_auszahlung_at, sf_reached_blockiert_at,
+          sf_termin_datum, sf_termin_stattgefunden, sf_termin_stattgefunden_at
+        `)
+        .or("email.not.is.null,phone.not.is.null")
+        .neq("ghl_location_id", SIMPLI_FINANCE_LOCATION_ID) // Exclude SF's own contacts
+        .neq("is_archived", true) // Exclude archived leads (includes null and false)
+        .range(offset, offset + pageSize - 1);
+
+      if (leadsError) {
+        console.error("Error fetching leads:", leadsError);
+        return jsonResponse({ error: "Failed to fetch leads" }, 500);
+      }
+
+      if (!page || page.length === 0) break;
+
+      maklerLeads = maklerLeads.concat(page);
+      console.log(`Fetched ${page.length} leads (offset ${offset}, total ${maklerLeads.length})`);
+
+      if (page.length < pageSize) break; // Last page
+      offset += pageSize;
     }
 
-    console.log("Makler leads to match:", maklerLeads?.length || 0);
+    console.log("Total Makler leads to match:", maklerLeads.length);
 
     // Build lookup maps for leads
     const leadsByEmail: Record<string, any> = {};
@@ -314,7 +360,86 @@ serve(async (req: Request) => {
     // Step 5: Match opportunities with leads and update
     let matched = 0;
     let updated = 0;
-    const updates: { leadId: string; oppId: string; stage: string; sfContactId: string }[] = [];
+    const updates: {
+      leadId: string;
+      oppId: string;
+      stage: string;
+      sfContactId: string;
+      oppUpdatedAt: string;
+      currentFlags: {
+        sf_reached_beratung: boolean | null;
+        sf_reached_bestaetigung: boolean | null;
+        sf_reached_warte_kredit: boolean | null;
+        sf_reached_vertrag: boolean | null;
+        sf_reached_auszahlung: boolean | null;
+        sf_reached_blockiert: boolean | null;
+        sf_reached_beratung_at: string | null;
+        sf_reached_bestaetigung_at: string | null;
+        sf_reached_warte_kredit_at: string | null;
+        sf_reached_vertrag_at: string | null;
+        sf_reached_auszahlung_at: string | null;
+        sf_reached_blockiert_at: string | null;
+        sf_termin_datum: string | null;
+        sf_termin_stattgefunden: boolean | null;
+        sf_termin_stattgefunden_at: string | null;
+      };
+      appointment: Appointment | null;
+    }[] = [];
+
+    // Step 5a: Fetch calendar appointments for SF contacts
+    console.log("Fetching calendar appointments...");
+    const appointmentMap: Record<string, Appointment> = {};
+
+    // Get all calendars for SF location
+    const calendarsUrl = `${GHL_API_BASE}/calendars/?locationId=${SIMPLI_FINANCE_LOCATION_ID}`;
+    const calendarsRes = await fetch(calendarsUrl, { headers });
+
+    if (calendarsRes.ok) {
+      const calendarsData = await calendarsRes.json();
+      const calendars = calendarsData.calendars || [];
+      console.log(`Found ${calendars.length} calendars`);
+
+      // Fetch events from each calendar (next 60 days and past 30 days)
+      const now = Date.now();
+      const startTime = now - (30 * 24 * 60 * 60 * 1000); // 30 days ago
+      const endTime = now + (60 * 24 * 60 * 60 * 1000); // 60 days from now
+
+      for (const calendar of calendars) {
+        try {
+          const eventsUrl = `${GHL_API_BASE}/calendars/events?calendarId=${calendar.id}&startTime=${startTime}&endTime=${endTime}`;
+          const eventsRes = await fetch(eventsUrl, { headers });
+
+          if (eventsRes.ok) {
+            const eventsData = await eventsRes.json();
+            const events = eventsData.events || [];
+
+            for (const event of events) {
+              if (event.contactId && event.startTime) {
+                // Only store if we don't have an appointment for this contact yet
+                // or if this appointment is more recent
+                const existing = appointmentMap[event.contactId];
+                if (!existing || new Date(event.startTime) > new Date(existing.startTime)) {
+                  appointmentMap[event.contactId] = {
+                    id: event.id,
+                    title: event.title || "Beratungstermin",
+                    startTime: event.startTime,
+                    endTime: event.endTime,
+                    status: event.status || "confirmed",
+                    contactId: event.contactId,
+                  };
+                }
+              }
+            }
+          }
+          // Rate limiting
+          await new Promise(r => setTimeout(r, 100));
+        } catch (err) {
+          console.error(`Error fetching events for calendar ${calendar.id}:`, err);
+        }
+      }
+    }
+
+    console.log(`Found appointments for ${Object.keys(appointmentMap).length} contacts`);
 
     for (const opp of allOpportunities) {
       const contact = contactMap[opp.contactId];
@@ -334,16 +459,53 @@ serve(async (req: Request) => {
         const stageName = stageIdToName[opp.pipelineStageId] || opp.pipelineStageId;
 
         // Normalize stage name for storage
-        const stageKey = stageName.toLowerCase().replace(/[^\w\s]/g, "").trim();
+        // 1. Lowercase
+        // 2. Replace umlauts with ASCII equivalents
+        // 3. Remove emojis and special characters (keep letters, numbers, spaces)
+        const stageKey = stageName
+          .toLowerCase()
+          .replace(/ü/g, "u")
+          .replace(/ö/g, "o")
+          .replace(/ä/g, "a")
+          .replace(/ß/g, "ss")
+          .replace(/[^\w\s]/g, "")
+          .trim();
+        console.log(`Stage normalization: "${stageName}" -> "${stageKey}"`);
         const normalizedStage = STAGE_MAPPING[stageKey] || stageName;
 
-        // Check if update needed
-        if (matchedLead.sf_opportunity_id !== opp.id || matchedLead.sf_pipeline_stage !== normalizedStage) {
+        // Get appointment for this contact if available
+        const appointment = appointmentMap[opp.contactId];
+
+        // Check if update needed (always update if we have appointment data and lead doesn't have it yet)
+        const needsUpdate = matchedLead.sf_opportunity_id !== opp.id ||
+                           matchedLead.sf_pipeline_stage !== normalizedStage ||
+                           (appointment && !matchedLead.sf_termin_datum);
+
+        if (needsUpdate) {
           updates.push({
             leadId: matchedLead.id,
             oppId: opp.id,
             stage: normalizedStage,
             sfContactId: opp.contactId,
+            oppUpdatedAt: opp.updatedAt, // Use the GHL opportunity timestamp
+            currentFlags: {
+              sf_reached_beratung: matchedLead.sf_reached_beratung,
+              sf_reached_bestaetigung: matchedLead.sf_reached_bestaetigung,
+              sf_reached_warte_kredit: matchedLead.sf_reached_warte_kredit,
+              sf_reached_vertrag: matchedLead.sf_reached_vertrag,
+              sf_reached_auszahlung: matchedLead.sf_reached_auszahlung,
+              sf_reached_blockiert: matchedLead.sf_reached_blockiert,
+              sf_reached_beratung_at: matchedLead.sf_reached_beratung_at,
+              sf_reached_bestaetigung_at: matchedLead.sf_reached_bestaetigung_at,
+              sf_reached_warte_kredit_at: matchedLead.sf_reached_warte_kredit_at,
+              sf_reached_vertrag_at: matchedLead.sf_reached_vertrag_at,
+              sf_reached_auszahlung_at: matchedLead.sf_reached_auszahlung_at,
+              sf_reached_blockiert_at: matchedLead.sf_reached_blockiert_at,
+              sf_termin_datum: matchedLead.sf_termin_datum,
+              sf_termin_stattgefunden: matchedLead.sf_termin_stattgefunden,
+              sf_termin_stattgefunden_at: matchedLead.sf_termin_stattgefunden_at,
+            },
+            appointment: appointment || null,
           });
         }
       }
@@ -357,29 +519,116 @@ serve(async (req: Request) => {
       // Determine which stage flags to set based on current stage
       // Once a flag is true, it stays true (high water mark)
       const stageFlags: Record<string, boolean> = {};
+      const stageTimestamps: Record<string, string> = {};
       const stage = update.stage.toLowerCase();
 
+      // Use the opportunity's updatedAt timestamp from GHL
+      const oppTimestamp = update.oppUpdatedAt || new Date().toISOString();
+
       // Set flags for current stage and all previous stages
+      // Only set timestamp if flag was not already true (first time reaching this stage)
       if (stage.includes("beratung") || stage.includes("bestaetigung") ||
           stage.includes("warte") || stage.includes("vertrag") || stage.includes("auszahlung")) {
         stageFlags.sf_reached_beratung = true;
+        if (!update.currentFlags.sf_reached_beratung && !update.currentFlags.sf_reached_beratung_at) {
+          stageTimestamps.sf_reached_beratung_at = oppTimestamp;
+        }
       }
       if (stage.includes("bestaetigung") || stage.includes("warte") ||
           stage.includes("vertrag") || stage.includes("auszahlung")) {
         stageFlags.sf_reached_bestaetigung = true;
+        if (!update.currentFlags.sf_reached_bestaetigung && !update.currentFlags.sf_reached_bestaetigung_at) {
+          stageTimestamps.sf_reached_bestaetigung_at = oppTimestamp;
+        }
       }
       if (stage.includes("warte") || stage.includes("vertrag") || stage.includes("auszahlung")) {
         stageFlags.sf_reached_warte_kredit = true;
+        if (!update.currentFlags.sf_reached_warte_kredit && !update.currentFlags.sf_reached_warte_kredit_at) {
+          stageTimestamps.sf_reached_warte_kredit_at = oppTimestamp;
+        }
       }
       if (stage.includes("vertrag") || stage.includes("auszahlung")) {
         stageFlags.sf_reached_vertrag = true;
+        if (!update.currentFlags.sf_reached_vertrag && !update.currentFlags.sf_reached_vertrag_at) {
+          stageTimestamps.sf_reached_vertrag_at = oppTimestamp;
+        }
       }
       if (stage.includes("auszahlung")) {
         stageFlags.sf_reached_auszahlung = true;
+        if (!update.currentFlags.sf_reached_auszahlung && !update.currentFlags.sf_reached_auszahlung_at) {
+          stageTimestamps.sf_reached_auszahlung_at = oppTimestamp;
+        }
       }
       if (stage.includes("blockiert")) {
         stageFlags.sf_reached_blockiert = true;
+        if (!update.currentFlags.sf_reached_blockiert && !update.currentFlags.sf_reached_blockiert_at) {
+          stageTimestamps.sf_reached_blockiert_at = oppTimestamp;
+        }
       }
+
+      // Handle appointment/termin data
+      const terminData: Record<string, unknown> = {};
+
+      if (update.appointment && !update.currentFlags.sf_termin_datum) {
+        // Set appointment date if we have it and lead doesn't have it yet
+        terminData.sf_termin_datum = update.appointment.startTime;
+      }
+
+      // Check if termin stattgefunden (appointment completed)
+      // Logic: appointment date has passed AND lead is NOT in no_show or abgesagt status
+      if (update.appointment && !update.currentFlags.sf_termin_stattgefunden) {
+        const appointmentDate = new Date(update.appointment.startTime);
+        const now = new Date();
+        const isNoShow = stage.includes("no_show") || stage.includes("noshow");
+        const isAbgesagt = stage.includes("abgesagt") || stage.includes("cancelled");
+
+        // Termin hat stattgefunden wenn:
+        // 1. Termindatum ist vergangen UND
+        // 2. Lead ist NICHT in no_show oder abgesagt Status UND
+        // 3. Appointment status ist nicht "cancelled" oder "no_show"
+        const appointmentCompleted = appointmentDate < now &&
+                                     !isNoShow &&
+                                     !isAbgesagt &&
+                                     update.appointment.status !== "cancelled" &&
+                                     update.appointment.status !== "no_show";
+
+        if (appointmentCompleted) {
+          terminData.sf_termin_stattgefunden = true;
+          terminData.sf_termin_stattgefunden_at = update.appointment.startTime; // Use appointment time as completion time
+        }
+      }
+
+      // Also mark termin as completed if they've progressed past beratung stage
+      // (e.g., if they're in bestaetigung or later, appointment must have happened)
+      if (!update.currentFlags.sf_termin_stattgefunden &&
+          (stage.includes("bestaetigung") || stage.includes("warte") ||
+           stage.includes("vertrag") || stage.includes("auszahlung"))) {
+        terminData.sf_termin_stattgefunden = true;
+        if (!update.currentFlags.sf_termin_stattgefunden_at) {
+          // Use beratung timestamp or opportunity timestamp as fallback
+          terminData.sf_termin_stattgefunden_at =
+            update.currentFlags.sf_reached_beratung_at ||
+            stageTimestamps.sf_reached_beratung_at ||
+            oppTimestamp;
+        }
+      }
+
+      // Also mark termin as completed if lead is "blockiert" but previously reached beratung
+      // This means they had an appointment that happened before being blocked
+      if (!update.currentFlags.sf_termin_stattgefunden &&
+          !terminData.sf_termin_stattgefunden &&
+          stage.includes("blockiert") &&
+          (update.currentFlags.sf_reached_beratung || stageFlags.sf_reached_beratung)) {
+        terminData.sf_termin_stattgefunden = true;
+        if (!update.currentFlags.sf_termin_stattgefunden_at) {
+          terminData.sf_termin_stattgefunden_at =
+            update.currentFlags.sf_reached_beratung_at ||
+            stageTimestamps.sf_reached_beratung_at ||
+            oppTimestamp;
+        }
+      }
+
+      console.log(`Updating lead ${update.leadId}: stage=${update.stage}, oppTimestamp=${oppTimestamp}, newTimestamps=${JSON.stringify(stageTimestamps)}, terminData=${JSON.stringify(terminData)}`);
 
       const { error: updateError } = await supabase
         .from("leads")
@@ -387,8 +636,10 @@ serve(async (req: Request) => {
           sf_opportunity_id: update.oppId,
           sf_pipeline_stage: update.stage,
           sf_contact_id: update.sfContactId,
-          sf_pipeline_updated_at: new Date().toISOString(),
+          sf_pipeline_updated_at: oppTimestamp, // Use GHL opportunity timestamp
           ...stageFlags, // Set stage flags (only sets to true, never false)
+          ...stageTimestamps, // Set timestamps only for newly reached stages
+          ...terminData, // Set appointment/termin data
         })
         .eq("id", update.leadId);
 
