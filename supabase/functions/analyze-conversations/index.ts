@@ -307,6 +307,7 @@ Deno.serve(async (req) => {
     let remainingLeads = 0;
     let timedOut = false;
     const verifyHistory: any[] = []; // Track DB row counts after each batch
+    const upsertDebug: any[] = []; // Debug: capture upsert response details
 
     // === LOAD ALL LEADS ONCE (with proper pagination to get ALL rows) ===
     let allLeadsRaw: any[] = [];
@@ -329,14 +330,19 @@ Deno.serve(async (req) => {
     console.log(`[analyze-conversations] Loaded ${allLeadsRaw.length} total leads`);
 
     // Get existing analyses for incremental check
+    // Use small chunks (100) to avoid URL length limits with .in() queries
     const allLeadIds = allLeadsRaw.map(l => l.id);
     let allExistingAnalyses: any[] = [];
-    for (let i = 0; i < allLeadIds.length; i += 1000) {
-      const chunk = allLeadIds.slice(i, i + 1000);
-      const { data: chunkAnalyses } = await supabase
+    const IN_CHUNK_SIZE = 100;
+    for (let i = 0; i < allLeadIds.length; i += IN_CHUNK_SIZE) {
+      const chunk = allLeadIds.slice(i, i + IN_CHUNK_SIZE);
+      const { data: chunkAnalyses, error: chunkErr } = await supabase
         .from('lead_conversation_analysis')
         .select('lead_id, last_message_analyzed_at, analyzed_at')
         .in('lead_id', chunk);
+      if (chunkErr) {
+        console.error(`[analyze-conversations] Error fetching existing analyses chunk ${i}: ${chunkErr.message}`);
+      }
       if (chunkAnalyses) allExistingAnalyses = [...allExistingAnalyses, ...chunkAnalyses];
     }
 
@@ -832,6 +838,7 @@ Deno.serve(async (req) => {
           const respText = await upsertResp.text();
           if (!upsertResp.ok) {
             console.error(`[analyze-conversations] Batch upsert FAILED: ${upsertResp.status} ${respText.substring(0, 500)}`);
+            upsertDebug.push({ batch: totalBatches + 1, status: upsertResp.status, error: respText.substring(0, 300), lead_ids: upsertData.map((d: any) => d.lead_id).slice(0, 3) });
             failedCount += successResults.length;
             analyzedCount = 0;
             skippedCount = 0;
@@ -840,8 +847,10 @@ Deno.serve(async (req) => {
             try {
               const rows = JSON.parse(respText);
               console.log(`[analyze-conversations] Batch upsert OK: ${upsertResp.status}, ${Array.isArray(rows) ? rows.length : '?'} rows returned`);
+              upsertDebug.push({ batch: totalBatches + 1, status: upsertResp.status, rows: Array.isArray(rows) ? rows.length : '?', lead_ids: upsertData.map((d: any) => d.lead_id).slice(0, 3) });
             } catch {
               console.log(`[analyze-conversations] Batch upsert OK: ${upsertResp.status}, body length=${respText.length}`);
+              upsertDebug.push({ batch: totalBatches + 1, status: upsertResp.status, bodyLen: respText.length, bodySnippet: respText.substring(0, 200) });
             }
           }
         } catch (e) {
@@ -1012,6 +1021,13 @@ Erstelle eine uebergreifende Meta-Analyse. Schreibe auf Deutsch. Antworte NUR mi
         remaining: remainingLeads,
         elapsed_ms: Date.now() - invocationStart,
         verify_history: verifyHistory,
+        upsert_debug: upsertDebug.slice(0, 5),
+        debug: {
+          total_leads_loaded: allLeadsRaw.length,
+          existing_analyses: allExistingAnalyses.length,
+          filtered_leads: filteredLeads.length,
+          job_started_at: job.started_at,
+        },
       }),
       { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     );
