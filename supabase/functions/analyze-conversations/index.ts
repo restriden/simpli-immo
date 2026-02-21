@@ -341,7 +341,7 @@ serve(async (req) => {
       allExistingAnalyses = [...allExistingAnalyses, ...(moreAnalyses || [])];
     }
 
-    const analysisMap = new Map<string, { last_message_analyzed_at: string | null; analyzed_at: string }>();
+    const analysisMap = new Map();
     allExistingAnalyses.forEach(a => {
       analysisMap.set(a.lead_id, {
         last_message_analyzed_at: a.last_message_analyzed_at,
@@ -399,7 +399,7 @@ serve(async (req) => {
       .in('lead_id', batchLeadIds)
       .order('created_at', { ascending: true });
 
-    const messagesByLead: Record<string, any[]> = {};
+    const messagesByLead: any = {};
     (allMessages || []).forEach(msg => {
       if (!messagesByLead[msg.lead_id]) {
         messagesByLead[msg.lead_id] = [];
@@ -414,7 +414,7 @@ serve(async (req) => {
       .select('id, phone, sf_pipeline_stage, ghl_tags')
       .eq('ghl_location_id', SIMPLI_FINANCE_LOCATION_ID);
 
-    const sfLeadsByPhone = new Map<string, { stage: string | null; tags: string[] }>();
+    const sfLeadsByPhone = new Map();
     (sfLeads || []).forEach(sfLead => {
       const phone = normalizePhone(sfLead.phone);
       if (phone) {
@@ -505,10 +505,10 @@ serve(async (req) => {
             finanzierung_gewollt: false,
             finanzierung_ablehnungsgrund: null,
             ai_einschaetzung: 'Kein Kontakt hergestellt - keine Einschätzung möglich.',
-            booking_page_summary: null as any,
+            booking_page_summary: null,
             // SF enrichment placeholder (filled in Phase 2)
-            sf_pipeline_stage: null as string | null,
-            sf_tags: [] as string[],
+            sf_pipeline_stage: null,
+            sf_tags: [],
             analyzed_at: now,
             messages_analyzed_count: 0,
             last_message_analyzed_at: null,
@@ -557,9 +557,9 @@ serve(async (req) => {
             finanzierung_gewollt: false,
             finanzierung_ablehnungsgrund: null,
             ai_einschaetzung: 'Lead hat auf keine Nachricht reagiert - Interesse nicht bewertbar.',
-            booking_page_summary: null as any,
-            sf_pipeline_stage: null as string | null,
-            sf_tags: [] as string[],
+            booking_page_summary: null,
+            sf_pipeline_stage: null,
+            sf_tags: [],
             analyzed_at: now,
             messages_analyzed_count: totalMessages,
             last_message_analyzed_at: lastMessageAt,
@@ -673,10 +673,10 @@ serve(async (req) => {
             finanzierung_gewollt: !!analysis.finanzierung_gewollt,
             finanzierung_ablehnungsgrund: analysis.finanzierung_ablehnungsgrund || null,
             ai_einschaetzung: analysis.ai_einschaetzung || '',
-            booking_page_summary: null as any, // Filled in Phase 3
+            booking_page_summary: null, // Filled in Phase 3
             // SF enrichment placeholder (filled in Phase 2)
-            sf_pipeline_stage: null as string | null,
-            sf_tags: [] as string[],
+            sf_pipeline_stage: null,
+            sf_tags: [],
             analyzed_at: now,
             messages_analyzed_count: totalMessages,
             last_message_analyzed_at: lastMessageAt,
@@ -737,16 +737,16 @@ serve(async (req) => {
     }
 
     // === PHASE 3: Booking Page Enrichment (data join, no AI) ===
-    const batchLeadIds = results
+    const batchLeadIdsBooking = results
       .filter(r => r.type !== 'error')
       .map(r => r.leadId);
 
-    let bookingEventsByLead: Record<string, any[]> = {};
-    if (batchLeadIds.length > 0) {
+    let bookingEventsByLead: any = {};
+    if (batchLeadIdsBooking.length > 0) {
       const { data: bookingEvents } = await supabase
         .from('booking_page_events')
         .select('lead_id, event_type, device_type, session_id, created_at')
-        .in('lead_id', batchLeadIds);
+        .in('lead_id', batchLeadIdsBooking);
 
       for (const evt of (bookingEvents || [])) {
         if (!evt.lead_id) continue;
@@ -878,7 +878,7 @@ serve(async (req) => {
           .not('ghl_location_id', 'in', `(${OWN_ACCOUNT_LOCATION_IDS.join(',')})`)
           .eq('is_archived', false);
 
-        const leadCreatedMap = new Map<string, Date>();
+        const leadCreatedMap = new Map();
         for (const l of (allLeadsForMeta || [])) {
           leadCreatedMap.set(l.id, new Date(l.created_at));
         }
