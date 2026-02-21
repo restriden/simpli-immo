@@ -1,4 +1,4 @@
-import { serve } from 'https://deno.land/std@0.168.0/http/server.ts';
+// Using Deno.serve (built-in) instead of legacy import
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.39.3';
 
 /**
@@ -175,7 +175,9 @@ function continueInBackground(
 ) {
   console.log(`[analyze-conversations] Triggering continuation for job ${jobId}`);
 
-  fetch(`${supabaseUrl}/functions/v1/analyze-conversations`, {
+  // Use EdgeRuntime.waitUntil() so Deno keeps the isolate alive until the fetch completes.
+  // Fire-and-forget fetch() doesn't work because Deno kills pending promises after response.
+  const continuation = fetch(`${supabaseUrl}/functions/v1/analyze-conversations`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -189,13 +191,18 @@ function continueInBackground(
   }).then(response => {
     if (!response.ok) {
       console.error(`[analyze-conversations] Continuation returned status ${response.status}`);
+    } else {
+      console.log(`[analyze-conversations] Continuation triggered successfully for job ${jobId}`);
     }
   }).catch(err => {
     console.error(`[analyze-conversations] Continuation failed for job ${jobId}:`, err);
   });
+
+  // @ts-ignore - EdgeRuntime is a Supabase-specific global
+  EdgeRuntime.waitUntil(continuation);
 }
 
-serve(async (req) => {
+Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response('ok', { headers: corsHeaders });
   }
