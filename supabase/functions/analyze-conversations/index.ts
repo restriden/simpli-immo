@@ -22,7 +22,8 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
-// Own accounts - not analyzed
+// SSOT: These values MUST match server/data/lead-constants.ts
+// Last synced: 2026-02-21
 const OWN_ACCOUNT_LOCATION_IDS: string[] = [
   "iDLo7b4WOOCkE9voshIM", // Simpli Finance GmbH
   "dI8ofFbKIogmLSUTvTFn", // simpli.immo
@@ -31,6 +32,14 @@ const OWN_ACCOUNT_LOCATION_IDS: string[] = [
 
 const SIMPLI_FINANCE_LOCATION_ID = "iDLo7b4WOOCkE9voshIM";
 const BATCH_SIZE = 10;
+
+// SSOT: Test/internal names to exclude - must match server/data/lead-constants.ts
+const EXCLUDED_NAMES = ["sabik", "mika schneider", "dennis melson", "suzan test", "andrey korchagin", "tim hoppe"];
+function isExcludedName(name: string | null | undefined): boolean {
+  if (!name) return false;
+  const lower = name.toLowerCase().trim();
+  return EXCLUDED_NAMES.some(n => lower === n || lower.includes(n)) || /test/i.test(name);
+}
 
 function normalizePhone(phone: string | null | undefined): string | null {
   if (!phone) return null;
@@ -215,9 +224,9 @@ Deno.serve(async (req) => {
 
       const { data: allLeads, error: leadsError } = await supabase
         .from('leads')
-        .select('id, ghl_location_id, is_archived')
+        .select('id, name, ghl_location_id, is_archived')
         .not('ghl_location_id', 'in', `(${OWN_ACCOUNT_LOCATION_IDS.join(',')})`)
-        .eq('is_archived', false);
+        .or('is_archived.is.null,is_archived.eq.false');
 
       if (leadsError) {
         return new Response(
@@ -226,7 +235,8 @@ Deno.serve(async (req) => {
         );
       }
 
-      const allLeadIds = (allLeads || []).map(l => l.id);
+      // SSOT: Exclude test/internal names
+      const allLeadIds = (allLeads || []).filter(l => !isExcludedName(l.name)).map(l => l.id);
 
       if (allLeadIds.length === 0) {
         return new Response(
@@ -318,12 +328,13 @@ Deno.serve(async (req) => {
         .from('leads')
         .select('id, ghl_location_id, name, email, phone, created_at, is_archived, last_message_at, sf_pipeline_stage, ghl_tags, booking_page_visited, booking_page_visited_at')
         .not('ghl_location_id', 'in', `(${OWN_ACCOUNT_LOCATION_IDS.join(',')})`)
-        .eq('is_archived', false)
+        .or('is_archived.is.null,is_archived.eq.false')
         .order('id', { ascending: true })
         .range(page * PAGE_SIZE, (page + 1) * PAGE_SIZE - 1);
 
       if (pageErr || !pageData || pageData.length === 0) break;
-      allLeadsRaw = [...allLeadsRaw, ...pageData];
+      // SSOT: Exclude test/internal names
+      allLeadsRaw = [...allLeadsRaw, ...pageData.filter(l => !isExcludedName(l.name))];
       if (pageData.length < PAGE_SIZE) break;
       page++;
     }
@@ -908,12 +919,13 @@ Deno.serve(async (req) => {
         // Get leads for period filtering
         const { data: allLeadsForMeta } = await supabase
           .from('leads')
-          .select('id, created_at')
+          .select('id, name, created_at')
           .not('ghl_location_id', 'in', `(${OWN_ACCOUNT_LOCATION_IDS.join(',')})`)
-          .eq('is_archived', false);
+          .or('is_archived.is.null,is_archived.eq.false');
 
         const leadCreatedMap = new Map();
         for (const l of (allLeadsForMeta || [])) {
+          if (isExcludedName(l.name)) continue;
           leadCreatedMap.set(l.id, new Date(l.created_at));
         }
 
